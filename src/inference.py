@@ -471,7 +471,28 @@ def rank_hosts(
         return []
 
     slice_host = np.asarray(slice_host)
-    risk = np.zeros(len(slices), dtype=np.float32)
+
+    # Two readings per slice. `risk_last` is the score at the slice's final
+    # window - "risk now". `risk_peak` is the highest score in the slice's
+    # settled region.
+    #
+    # Ranking on the final step alone hides the hosts triage exists to find: a
+    # machine whose risk spikes mid-slice and settles back reports as 0.0 and
+    # sinks down the list. But taking a plain max over the slice is worse,
+    # because every slice starts the recurrent state from zero and the model's
+    # first few outputs are warm-up noise. Measured on one quiet host, mean risk
+    # per step-in-slice ran 0.117, 0.061, 0.059, 0.058, 0.044, 0.049, 0.029,
+    # 0.001, then 0.000 from step 8 on - while the same host scored max 0.002
+    # over the full sequence. A naive max would have promoted it to the top of
+    # the triage list on pure warm-up artefact.
+    #
+    # So the peak ignores the first half of each slice. With stride = context/2
+    # every window still lands in some slice's settled region, so nothing real
+    # is missed.
+    warmup = min_windows // 2
+
+    risk_last = np.zeros(len(slices), dtype=np.float32)
+    risk_peak = np.zeros(len(slices), dtype=np.float32)
     surprise = np.zeros(len(slices), dtype=np.float32)
     stage = np.zeros(len(slices), dtype=np.int64)
 
@@ -481,8 +502,12 @@ def rank_hosts(
         ).to(engine.device)
         out = engine.model.observe(obs, sample=False)
         end = start + obs.size(0)
-        risk[start:end] = torch.sigmoid(out["infiltration_logit"])[:, -1].cpu().numpy()
-        surprise[start:end] = engine.surprise(out, obs)[:, -1].cpu().numpy()
+        probs = torch.sigmoid(out["infiltration_logit"])
+        risk_last[start:end] = probs[:, -1].cpu().numpy()
+        risk_peak[start:end] = probs[:, warmup:].max(dim=1).values.cpu().numpy()
+        surprise[start:end] = (
+            engine.surprise(out, obs)[:, warmup:].max(dim=1).values.cpu().numpy()
+        )
         stage[start:end] = out["stage_logits"][:, -1].argmax(-1).cpu().numpy()
 
     # Roll forward only from each host's most recent slice - the forecast is
@@ -516,8 +541,8 @@ def rank_hosts(
     rows = []
     for h in range(len(hosts)):
         mask = slice_host == h
-        observed_peak = float(risk[mask].max())
-        current = float(risk[last_slice[h]])
+        observed_peak = float(risk_peak[mask].max())
+        current = float(risk_last[last_slice[h]])
         current_stage = int(stage[last_slice[h]])
         rows.append({
             "host": hosts[h],

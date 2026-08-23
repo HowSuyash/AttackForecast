@@ -302,17 +302,40 @@ function drawForecast(cv, timeline, forecast, threshold){
     g.fillStyle = "rgba(211,32,64,.14)"; g.fill();
   }
 
-  // observed risk
-  g.beginPath();
-  timeline.forEach((p,i)=> i?g.lineTo(X(i),Y(p.risk)):g.moveTo(X(i),Y(p.risk)));
-  g.strokeStyle = css("var(--accent)"); g.lineWidth=2; g.stroke();
+  // Observed risk, drawn one segment at a time and coloured by the stage the
+  // model inferred for that minute.
+  //
+  // A single-colour line is useless on this dataset: CTU-13's infected hosts
+  // are malicious in every window they appear, so the probability sits pinned
+  // at 100% and the chart looks frozen even while replay advances. The stage
+  // does change - reconnaissance gives way to exfiltration - so colouring the
+  // line by stage puts the progression back where the eye is already looking.
+  g.lineWidth = 2.5;
+  for(let i=1;i<timeline.length;i++){
+    g.beginPath();
+    g.moveTo(X(i-1), Y(timeline[i-1].risk));
+    g.lineTo(X(i),   Y(timeline[i].risk));
+    g.strokeStyle = css(STAGE_COLORS[timeline[i].stage] || "var(--accent)");
+    g.stroke();
+  }
 
-  // forecast mean
-  g.beginPath();
-  g.moveTo(nowX, Y(timeline[nPast-1].risk));
-  forecast.forEach((f,i)=> g.lineTo(X(nPast+i), Y(f.risk)));
-  g.strokeStyle = css("var(--danger)"); g.lineWidth=2; g.setLineDash([5,4]); g.stroke();
+  // forecast mean, same convention
+  g.lineWidth = 2.5; g.setLineDash([5,4]);
+  let px = nowX, py = Y(timeline[nPast-1].risk);
+  forecast.forEach((f,i)=>{
+    const x = X(nPast+i), y = Y(f.risk);
+    g.beginPath(); g.moveTo(px,py); g.lineTo(x,y);
+    g.strokeStyle = css(STAGE_COLORS[f.stage] || "var(--danger)");
+    g.stroke();
+    px = x; py = y;
+  });
   g.setLineDash([]);
+
+  // A marker at "now" so the playhead is visible even when the line is flat.
+  g.beginPath(); g.arc(nowX, Y(timeline[nPast-1].risk), 4.5, 0, Math.PI*2);
+  g.fillStyle = css("var(--panel)"); g.fill();
+  g.strokeStyle = css(STAGE_COLORS[timeline[nPast-1].stage] || "var(--accent)");
+  g.lineWidth = 2.5; g.stroke();
 
   // forecast points coloured by predicted stage
   forecast.forEach((f,i)=>{
@@ -665,17 +688,21 @@ function renderForecast(d){
       </div>
       <canvas id="fcChart"></canvas>
       <div class="legend">
-        <span><i style="background:var(--accent)"></i>Observed (filtered)</span>
-        <span><i style="background:var(--danger)"></i>Forecast (imagined rollout)</span>
+        <span>Line colour = predicted stage:</span>
+        ${META.stages.filter(s=>s.id>0).map(s=>
+          `<span><i style="background:${STAGE_COLORS[s.id]}"></i>${s.name}</span>`
+        ).join("")}
         <span><i style="background:rgba(211,32,64,.30)"></i>10th&ndash;90th percentile</span>
-        <span><i style="background:var(--warn)"></i>Alert threshold</span>
-        <span><i style="background:var(--danger-wash)"></i>Ground-truth malicious window</span>
+        <span><i style="background:var(--danger-wash)"></i>Ground-truth malicious</span>
       </div>
-      <div class="hint">Left of the divider the model sees traffic. Right of it
+      <div class="hint">Left of the divider the model sees traffic; right of it
         it sees nothing &mdash; each step is rolled forward through the learned
-        prior, so the band widens as evidence runs out. Press <strong>Play</strong>
-        to watch the forecast being made minute by minute, then time advance
-        past it.</div>
+        prior. Solid line is observed, dashed is imagined.
+        <strong>On this host the probability stays pinned at 100%</strong> because
+        CTU-13's infected machines are malicious in every window they appear
+        &mdash; so watch the <em>colour</em>, not the height: it is the ATT&amp;CK
+        stage, and it changes as the attack progresses. Press
+        <strong>Play</strong> to advance minute by minute.</div>
     </div></div>
 
     <div class="row"><div class="card">
