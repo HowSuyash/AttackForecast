@@ -341,6 +341,24 @@ which fired.
 | **World model (RSSM)** | 0.998 | **0.455** | **0.683** |
 | Logistic regression (8-window stack) | 0.975 | 0.353 | 0.530 |
 
+**Only three of the five stages are actually learnable here.** Counting model
+predictions against derived labels across all seven captures:
+
+| Stage | Model predicts | In the data |
+|---|---|---|
+| Reconnaissance | 111 | 400 |
+| Command & Control | 204 | 46 |
+| Exfiltration | 227 | 215 |
+| **Initial Access** | **0** | **13** |
+| **Lateral Movement** | **0** | **37** |
+
+Thirteen and thirty-seven examples are not enough to learn a class, and the
+model never emits either one. The dashboard says so in the legend rather than
+listing five colours the line can never take — CTU-13's botnets are spam and
+click-fraud operations that barely move laterally, so the gap is the dataset's,
+not a tuning failure. A capture with real lateral movement (or an enterprise
+deployment) would be needed to train those two stages.
+
 **Stage forecasting is the honest test**, and the world model beats the
 like-for-like persistence baseline at 9 of 10 horizons — at +4 to +6 windows it
 matches the *oracle* persistence baseline that is handed the true current stage.

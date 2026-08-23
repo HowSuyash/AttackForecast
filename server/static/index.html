@@ -564,6 +564,32 @@ function drawAttention(cv, attn, _t){
 
 function riskClass(v){ return v>=0.5?"danger":v>=0.25?"warn":"safe"; }
 
+// Stages the model has never been able to learn, because CTU-13 barely
+// contains them: 13 Initial Access cells and 37 Lateral Movement cells across
+// all seven captures. Listing them in a legend as though the line might turn
+// those colours is a promise the model cannot keep, so they are named as
+// unsupported instead of silently sitting in the key.
+const UNLEARNED_STAGES = {2: "13 training cells", 3: "37 training cells"};
+
+function stageLegend(d){
+  const present = new Set();
+  (d.timeline || []).forEach(p => present.add(p.stage));
+  (d.forecast || []).forEach(f => present.add(f.stage));
+
+  const shown = META.stages.filter(s => s.id > 0 && present.has(s.id));
+  const rest  = META.stages.filter(s => s.id > 0 && !present.has(s.id));
+
+  return shown.map(s =>
+      `<span><i style="background:${STAGE_COLORS[s.id]}"></i>${s.name}</span>`
+    ).join("")
+    + (rest.length
+        ? `<span style="opacity:.6">not in this host: ${
+            rest.map(s => UNLEARNED_STAGES[s.id]
+              ? `${s.name} (unsupported, ${UNLEARNED_STAGES[s.id]})`
+              : s.name).join(", ")}</span>`
+        : "");
+}
+
 function killChain(cur, pred){
   const stages = META.stages.filter(s=>s.id>0);
   return `<div class="chain">` + stages.map(s=>{
@@ -727,9 +753,7 @@ function renderForecast(d){
       <canvas id="fcChart"></canvas>
       <div class="legend">
         <span>Line colour = predicted stage:</span>
-        ${META.stages.filter(s=>s.id>0).map(s=>
-          `<span><i style="background:${STAGE_COLORS[s.id]}"></i>${s.name}</span>`
-        ).join("")}
+        ${stageLegend(d)}
         <span><i style="background:rgba(211,32,64,.30)"></i>10th&ndash;90th percentile</span>
         <span><i style="background:var(--danger-wash)"></i>Ground-truth malicious</span>
       </div>
@@ -747,14 +771,18 @@ function renderForecast(d){
       <h3>Kill-chain timeline &mdash; whole capture at a glance</h3>
       <canvas id="stripChart"></canvas>
       <div class="striplegend">
-        ${META.stages.map(s=>
+        ${META.stages.filter(s=>!UNLEARNED_STAGES[s.id]).map(s=>
           `<span><i style="background:${STAGE_COLORS[s.id]}"></i>${s.name}</span>`
         ).join("")}
         <span><i style="background:var(--danger);height:3px"></i>ground-truth malicious</span>
       </div>
       <div class="hint">One block per minute, coloured by the stage the model
         inferred. The red ticks underneath are the dataset's own labels, so
-        prediction and reality sit on the same axis.</div>
+        prediction and reality sit on the same axis.
+        <strong>Initial Access and Lateral Movement are absent from this key on
+        purpose</strong> &mdash; CTU-13 contains only 13 and 37 windows of them
+        across all seven captures, too few for the model to learn, so it never
+        predicts either.</div>
     </div></div>
 
     <div class="row"><div class="card">
