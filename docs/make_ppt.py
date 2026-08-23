@@ -469,7 +469,7 @@ def build_feasibility(slide, images_dir: Path) -> None:
 
     add_table(slide, LEFT, TOP + 0.54, left_w, 1.60,
               [
-                  ["Model (temporal split)", "F1", "FPR", "Recall"],
+                  ["Sustained compromise, temporal split", "F1", "FPR", "Recall"],
                   ["World model (ours)", "0.984", "0.000", "1.000"],
                   ["Logistic regression, 8-window", "0.744", "0.004", "0.912"],
                   ["Logistic regression, 1 window", "0.550", "0.009", "0.842"],
@@ -505,10 +505,14 @@ def build_feasibility(slide, images_dir: Path) -> None:
                  ("Generalising to unseen malware families", 2),
                  ("Only ~4 infected hosts to learn from → reported as a "
                   "measured limitation, not hidden; needs more captures", 1),
+                 ("Short-burst compromise is missed", 2),
+                 ("Same IP scores 1.000 with 284 malicious windows and 0.000 "
+                  "with 20 → not memorisation, a dependence on sustained "
+                  "activity; F1 above is for sustained compromise", 1),
                  ("Class imbalance (0.8% positive)", 2),
                  ("Transition-aware weighted sampling + noise augmentation "
                   "+ a deliberately small model", 1),
-             ], accent=RED, size=10)
+             ], accent=RED, size=9.5)
 
     # A screenshot from the running prototype. The deck is read without the
     # demo in the room, so one frame of real output does more for credibility

@@ -343,6 +343,32 @@ def main() -> None:
         heading = "Infiltration detection - held-out malware families"
     md = markdown_table(rows, heading)
 
+    # Who the positives actually belong to. A headline F1 is meaningless without
+    # it: if every positive window in the test split comes from a handful of
+    # hosts, the number describes those hosts, not "attack detection".
+    pos_hosts: dict[str, int] = {}
+    host_names = test_seq["host_names"]
+    for seq_i, host_i in enumerate(test_seq["host_index"]):
+        n = int(test_seq["infiltration"][seq_i].sum())
+        if n:
+            name = str(host_names[host_i])
+            pos_hosts[name] = pos_hosts.get(name, 0) + n
+
+    md += "\n\n### What the test split actually contains\n\n"
+    md += ("| Host carrying positives | Positive windows |\n|---|---|\n")
+    for host, n in sorted(pos_hosts.items(), key=lambda kv: -kv[1]):
+        md += f"| `{host}` | {n} |\n"
+    md += (
+        f"\n> **Scope of the detection numbers.** Every positive window in this "
+        f"split belongs to the {len(pos_hosts)} host(s) above. Measured "
+        f"separately, the model scores risk 1.000 for a host with 284 sustained "
+        f"malicious windows and 0.000 for hosts with roughly 20 - including the "
+        f"same IP address in a different capture, so this is not address "
+        f"memorisation but a dependence on sustained activity. The figures below "
+        f"therefore characterise **detection of sustained compromise**; "
+        f"short bursts of around twenty minutes are currently missed.\n"
+    )
+
     md += (
         "\n\n> **Reading the binary numbers.** On CTU-13 an infected host is "
         "malicious in *every* window it appears, so `infiltration_next` is "

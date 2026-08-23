@@ -275,14 +275,37 @@ final 15% of each.
 | Logistic regression (8-window stack) | 0.628 | 0.912 | 0.744 | 0.004 | 0.997 | 0.858 |
 | Logistic regression (single window) | 0.409 | 0.842 | 0.550 | 0.009 | 0.994 | 0.730 |
 
-**Read the binary numbers carefully.** Because an infected host is malicious in
-every window it appears, `infiltration_next` is near-constant per host. A strong
-score here means the model identified *which host is compromised* — a real
-detection result, and a large margin over both baselines — but a perfect score
-at +10 windows is **not** evidence of forecasting skill, because the target
-barely changes across the horizon. For context, the best single feature
-(`frac_syn_only`) reaches AP 0.21 on validation, so the model is not riding one
-giveaway column.
+**Read the binary numbers carefully — twice over.**
+
+*First*, because an infected host is malicious in every window it appears,
+`infiltration_next` is near-constant per host. A strong score means the model
+identified *which host is compromised* — a real detection result with a large
+margin over both baselines — but a perfect score at +10 windows is **not**
+evidence of forecasting skill, because the target barely changes across the
+horizon. For context, the best single feature (`frac_syn_only`) reaches AP 0.21
+on validation, so the model is not riding one giveaway column.
+
+*Second, and more limiting:* every positive window in this test split belongs to
+**three host-slots, all of them `147.32.84.165`** (in scenarios 1, 4 and 8).
+That is not a sampling choice — it is what falls in the held-out final 15% of
+each capture. Measured directly:
+
+| Host | Malicious windows | Model risk |
+|---|---|---|
+| scenario 1, `147.32.84.165` | 284 | **1.000** |
+| scenario 10, `147.32.84.165` | 20 | **0.000** |
+| scenario 10, `147.32.84.191` … `.209` (9 more) | ~20 each | **0.000** |
+
+The same IP address scores 1.000 in one capture and 0.000 in another, so this is
+**not address memorisation** — it is a dependence on *sustained* activity. The
+model needs a long run of malicious windows to accumulate confidence; a
+twenty-minute burst produces nothing.
+
+So the honest headline is: **F1 0.984 for detecting sustained compromise.**
+Short-burst compromise is currently missed, and scenario 10's ten
+lightly-infected hosts are the worked example. Fixing it likely means training
+with explicit short-burst positives rather than letting long runs dominate the
+loss.
 
 | MITRE stage prediction | Accuracy | Macro-F1 | Macro-F1 (classes present) |
 |---|---|---|---|

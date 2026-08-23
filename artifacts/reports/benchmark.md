@@ -6,6 +6,17 @@
 | Logistic regression (single window) | 0.409 | 0.842 | 0.550 | 0.009 | 0.994 | 0.730 |
 | Logistic regression (8-window stack) | 0.628 | 0.912 | 0.744 | 0.004 | 0.997 | 0.858 |
 
+### What the test split actually contains
+
+| Host carrying positives | Positive windows |
+|---|---|
+| `1:147.32.84.165` | 144 |
+| `4:147.32.84.165` | 64 |
+| `8:147.32.84.165` | 32 |
+
+> **Scope of the detection numbers.** Every positive window in this split belongs to the 3 host(s) above. Measured separately, the model scores risk 1.000 for a host with 284 sustained malicious windows and 0.000 for hosts with roughly 20 - including the same IP address in a different capture, so this is not address memorisation but a dependence on sustained activity. The figures below therefore characterise **detection of sustained compromise**; short bursts of around twenty minutes are currently missed.
+
+
 > **Reading the binary numbers.** On CTU-13 an infected host is malicious in *every* window it appears, so `infiltration_next` is near-constant per host. Scoring well on it means the model identified which host is compromised - a detection result, and a real one - but a perfect score at +10 windows is not evidence of forecasting skill, because the target barely changes over the horizon. The stage columns below are the honest forecasting test.
 
 
