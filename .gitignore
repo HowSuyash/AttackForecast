@@ -1,0 +1,34 @@
+# Raw captures. CTU-13 extracts to ~54 GB once the per-scenario PCAPs are
+# unpacked, and it is public data anyway - README has the download commands.
+data/raw/
+
+# Everything under data/processed/ IS committed on purpose: the parquet files
+# total ~14 MB, and shipping them means a reviewer can clone and run the
+# dashboard immediately instead of downloading 1.9 GB first. Same reasoning for
+# the trained checkpoint under artifacts/.
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local agent state
+.claude/
+
+# Scratch output
+*.log
+/tmp/

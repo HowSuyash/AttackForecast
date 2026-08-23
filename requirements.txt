@@ -1,0 +1,12 @@
+# Pinned for reproducibility. CPU-only torch: the model is small enough that a
+# GPU buys nothing, and CPU keeps the demo portable.
+numpy>=2.0
+pandas>=2.2
+scipy>=1.14
+scikit-learn>=1.5
+torch>=2.5
+scapy>=2.6
+fastapi>=0.109
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+pyarrow>=16.0

@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Attack Forecasting</title>
+<style>
+/* ---------------------------------------------------------------------
+   Everything is inline and self-contained: no CDN, no webfont, no build
+   step. The PS requires the interface to run fully offline, and a demo
+   that fails because the venue wifi is down is not a demo.
+   --------------------------------------------------------------------- */
+:root{
+  /* Light palette. Not an inversion of the dark one: the accents are
+     re-picked at higher saturation and lower lightness, because the neon
+     values that read well on #0b0f16 wash out to pastel on white and fail
+     contrast against it. Every foreground here clears 4.5:1 on --panel. */
+  --bg:#f4f6f9; --panel:#ffffff; --panel-2:#eef1f6; --line:#d8dee8;
+  --txt:#131a26; --txt-dim:#55607a; --txt-faint:#8a93a6;
+  --accent:#1f6feb; --safe:#0f8a5f; --warn:#a86a00; --danger:#d32040;
+  --recon:#1f6feb; --initial:#7a45d1; --lateral:#a86a00; --c2:#d1591f; --exfil:#d32040;
+  /* Tints used for fills and chips, kept as tokens so the canvas code and
+     the CSS cannot drift apart. */
+  --accent-wash:rgba(31,111,235,.10); --danger-wash:rgba(211,32,64,.09);
+  --initial-wash:rgba(122,69,209,.12); --warn-wash:rgba(168,106,0,.12);
+  --shadow:0 1px 2px rgba(19,26,38,.06), 0 2px 8px rgba(19,26,38,.05);
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);
+     font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;font-weight:600}
+button{font-family:inherit;font-size:inherit;cursor:pointer}
+
+/* ---------- shell ---------- */
+.app{display:grid;grid-template-columns:280px 1fr;min-height:100vh}
+.side{background:var(--panel);border-right:1px solid var(--line);
+      display:flex;flex-direction:column;overflow:hidden}
+.main{padding:20px 24px 40px;overflow-x:hidden}
+
+.brand{padding:18px 18px 14px;border-bottom:1px solid var(--line)}
+.brand h1{font-size:15px;letter-spacing:.2px}
+.brand .sub{color:var(--txt-faint);font-size:11px;margin-top:3px;font-family:var(--mono)}
+
+.side-sec{padding:14px 18px;border-bottom:1px solid var(--line)}
+.side-sec label{display:block;font-size:11px;text-transform:uppercase;
+                letter-spacing:.7px;color:var(--txt-faint);margin-bottom:7px}
+select,.btn{width:100%;background:var(--panel-2);color:var(--txt);
+            border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:13px}
+.btn{text-align:center;transition:.15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.btn.primary:hover{filter:brightness(1.08);color:#fff}
+
+.hosts{flex:1;overflow-y:auto;padding:6px 0}
+.hosts .hd{padding:10px 18px 6px;font-size:11px;text-transform:uppercase;
+           letter-spacing:.7px;color:var(--txt-faint)}
+.host{padding:9px 18px;border-left:3px solid transparent;cursor:pointer;
+      display:flex;justify-content:space-between;align-items:center;gap:8px}
+.host:hover{background:var(--panel-2)}
+.host.on{background:var(--panel-2);border-left-color:var(--accent)}
+.host .ip{font-family:var(--mono);font-size:12px}
+.host .meta{font-size:10.5px;color:var(--txt-faint);margin-top:2px}
+.risk-pill{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:20px;
+           background:var(--panel-2);color:var(--txt-dim);white-space:nowrap}
+.risk-pill.hi{background:var(--danger-wash);color:var(--danger);font-weight:600}
+.risk-pill.md{background:var(--warn-wash);color:var(--warn);font-weight:600}
+
+/* ---------- cards ---------- */
+.row{display:grid;gap:16px;margin-bottom:16px}
+.row.k3{grid-template-columns:repeat(3,1fr)}
+.row.k2{grid-template-columns:1fr 1fr}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      padding:16px;box-shadow:var(--shadow)}
+.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.7px;
+         color:var(--txt-dim);margin-bottom:12px}
+.card .hint{font-size:11px;color:var(--txt-faint);margin-top:10px;line-height:1.45}
+
+.stat{font-size:30px;font-weight:600;font-family:var(--mono);line-height:1.1}
+.stat.safe{color:var(--safe)} .stat.warn{color:var(--warn)} .stat.danger{color:var(--danger)}
+.stat-sub{font-size:12px;color:var(--txt-dim);margin-top:5px}
+
+/* ---------- kill chain ---------- */
+.chain{display:flex;align-items:stretch;gap:0}
+.stage{flex:1;position:relative;padding:11px 8px;text-align:center;
+       background:var(--panel-2);border:1px solid var(--line);
+       border-right:none;transition:.2s}
+.stage:first-child{border-radius:7px 0 0 7px}
+.stage:last-child{border-radius:0 7px 7px 0;border-right:1px solid var(--line)}
+.stage .nm{font-size:11px;font-weight:600}
+.stage .tid{font-size:9.5px;color:var(--txt-faint);font-family:var(--mono);margin-top:3px}
+.stage.now{background:var(--accent-wash);border-color:var(--accent);z-index:2}
+.stage.now .nm{color:var(--accent)}
+.stage.pred{background:var(--danger-wash);border-color:var(--danger);z-index:2}
+.stage.pred .nm{color:var(--danger)}
+.stage .badge{position:absolute;top:-8px;left:50%;transform:translateX(-50%);
+              font-size:9px;padding:1px 6px;border-radius:9px;white-space:nowrap;
+              text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.stage.now .badge{background:var(--accent);color:#fff}
+.stage.pred .badge{background:var(--danger);color:#fff}
+
+/* ---------- charts ---------- */
+canvas{display:block;width:100%}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--txt-dim)}
+.legend i{display:inline-block;width:18px;height:3px;border-radius:2px;
+          margin-right:6px;vertical-align:middle}
+
+/* ---------- attribution ---------- */
+.feat{margin-bottom:9px}
+.feat .top{display:flex;justify-content:space-between;font-size:11.5px;gap:8px}
+.feat .nm{color:var(--txt)}
+.feat .vl{font-family:var(--mono);color:var(--txt-dim);font-size:11px}
+.bar{height:5px;background:var(--panel-2);border-radius:3px;margin-top:4px;overflow:hidden;
+     position:relative;display:flex;justify-content:center}
+.bar span{position:absolute;top:0;height:100%;border-radius:3px}
+.tag{font-size:9px;padding:1px 5px;border-radius:4px;background:var(--panel-2);
+     color:var(--txt-faint);text-transform:uppercase;letter-spacing:.4px}
+.tag.packet{background:var(--initial-wash);color:var(--initial)}
+.tag.flow{background:var(--accent-wash);color:var(--accent)}
+
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line)}
+th{color:var(--txt-faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.6px}
+td.num,th.num{text-align:right;font-family:var(--mono)}
+tr.best td{color:var(--safe);font-weight:600}
+
+.narr{background:var(--panel-2);border-left:3px solid var(--accent);
+      padding:11px 13px;border-radius:0 7px 7px 0;font-size:13px;line-height:1.55}
+.msg{padding:40px;text-align:center;color:var(--txt-faint)}
+.msg code{background:var(--panel-2);padding:2px 6px;border-radius:4px;
+          font-family:var(--mono);color:var(--txt-dim)}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);
+      border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;
+      vertical-align:-2px;margin-right:7px}
+@keyframes sp{to{transform:rotate(360deg)}}
+/* ---------- replay controls ---------- */
+.replay{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+        padding:10px 12px;background:var(--panel-2);border:1px solid var(--line);
+        border-radius:8px;margin-bottom:12px}
+.replay button{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+               padding:6px 13px;color:var(--txt);font-size:13px;transition:.15s}
+.replay button:hover{border-color:var(--accent);color:var(--accent)}
+.replay button.play{background:var(--accent);color:#fff;border-color:var(--accent);
+                    font-weight:600;min-width:88px}
+.replay button.play:hover{filter:brightness(1.08);color:#fff}
+.replay .clock{font-family:var(--mono);font-size:12px;color:var(--txt-dim);
+               margin-left:auto;white-space:nowrap}
+.replay input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}
+.replay select{width:auto;padding:5px 8px;font-size:12px}
+
+/* ---------- kill-chain strip ---------- */
+.striplegend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11px;
+             color:var(--txt-dim)}
+.striplegend i{display:inline-block;width:11px;height:11px;border-radius:2px;
+               margin-right:5px;vertical-align:-1px}
+
+.tabs{display:flex;gap:4px;margin-bottom:16px}
+.tab{padding:7px 14px;border-radius:7px;background:transparent;border:1px solid transparent;
+     color:var(--txt-dim);font-size:13px}
+.tab.on{background:var(--panel);border-color:var(--line);color:var(--txt)}
+#file{display:none}
+@media(max-width:900px){.app{grid-template-columns:1fr}.row.k3,.row.k2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <h1>Network Attack Forecasting</h1>
+      <div class="sub" id="brandSub">world model &middot; loading&hellip;</div>
+    </div>
+
+    <div class="side-sec">
+      <label for="scenario">Capture</label>
+      <select id="scenario"></select>
+    </div>
+
+    <div class="side-sec">
+      <label>Analyse your own traffic</label>
+      <button class="btn" id="uploadBtn">Upload PCAP or flow CSV</button>
+      <input type="file" id="file" accept=".pcap,.pcapng,.cap,.binetflow,.csv">
+      <div class="hint" id="uploadHint" style="margin-top:8px"></div>
+    </div>
+
+    <div class="hosts">
+      <div class="hd">Hosts by forecast risk</div>
+      <div id="hostList"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="tabs">
+      <button class="tab on" data-tab="forecast">Forecast</button>
+      <button class="tab" data-tab="topology">Topology</button>
+      <button class="tab" data-tab="benchmark">Benchmark</button>
+    </div>
+    <div id="forecastTab"><div class="msg">Select a host to begin.</div></div>
+    <div id="topologyTab" style="display:none"></div>
+    <div id="benchmarkTab" style="display:none"></div>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+// Index 0 is Benign, deliberately the muted one: a benign forecast point
+// should recede rather than compete with the stage colours next to it.
+const STAGE_COLORS = ["var(--txt-faint)","var(--recon)","var(--initial)",
+                      "var(--lateral)","var(--c2)","var(--exfil)"];
+const $ = s => document.querySelector(s);
+const fmtPct = v => (100*v).toFixed(1) + "%";
+
+let META = null, CURRENT = null, SCENARIO = null, UPLOAD = null, TOPOLOGY = null;
+
+/* ------------------------------------------------------------------ */
+/* Charting. Hand-rolled on canvas: a chart library would be another
+   network dependency, and the one chart that matters here - observed
+   risk flowing into an imagined future with an uncertainty band - is
+   not a shape charting libraries draw out of the box anyway.          */
+/* ------------------------------------------------------------------ */
+
+function setupCanvas(cv, h){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || cv.parentElement.clientWidth;
+  cv.width = w*dpr; cv.height = h*dpr; cv.style.height = h+"px";
+  const g = cv.getContext("2d");
+  g.setTransform(dpr,0,0,dpr,0,0);
+  return {g,w,h};
+}
+function css(v){
+  return v.startsWith("var(")
+    ? getComputedStyle(document.documentElement).getPropertyValue(v.slice(4,-1)).trim()
+    : v;
+}
+
+function drawForecast(cv, timeline, forecast, threshold){
+  const {g,w,h} = setupCanvas(cv, 260);
+  const pad = {l:44, r:16, t:14, b:28};
+  const pw = w-pad.l-pad.r, ph = h-pad.t-pad.b;
+  const nPast = timeline.length, nFut = forecast.length, total = nPast+nFut;
+
+  // The forecast gets a fixed share of the width rather than a share
+  // proportional to its step count. With 120 observed windows against a
+  // 10-step horizon, proportional spacing squeezes the forecast - the entire
+  // point of the panel - into the rightmost 8% of the chart.
+  const FUT_FRAC = 0.32;
+  const obsW = pw * (1 - FUT_FRAC), futW = pw * FUT_FRAC;
+  const X = i => (i <= nPast - 1)
+    ? pad.l + (nPast <= 1 ? 0 : (i / (nPast - 1)) * obsW)
+    : pad.l + obsW + ((i - (nPast - 1)) / Math.max(1, nFut)) * futW;
+  const Y = v => pad.t + (1-v)*ph;
+
+  g.clearRect(0,0,w,h);
+
+  // grid + y labels
+  g.strokeStyle = css("var(--line)"); g.fillStyle = css("var(--txt-faint)");
+  g.font = "10px "+css("var(--mono)"); g.lineWidth = 1;
+  for(let v=0; v<=1.001; v+=0.25){
+    const y = Y(v);
+    g.beginPath(); g.moveTo(pad.l,y); g.lineTo(w-pad.r,y); g.stroke();
+    g.textAlign="right"; g.textBaseline="middle";
+    g.fillText((v*100).toFixed(0)+"%", pad.l-8, y);
+  }
+
+  // alert threshold
+  g.strokeStyle = css("var(--warn)"); g.setLineDash([4,4]); g.globalAlpha=.65;
+  g.beginPath(); g.moveTo(pad.l,Y(threshold)); g.lineTo(w-pad.r,Y(threshold)); g.stroke();
+  g.setLineDash([]); g.globalAlpha=1;
+
+  // "now" divider — everything right of this line is imagined
+  const nowX = X(nPast-1);
+  g.strokeStyle = css("var(--txt-faint)"); g.setLineDash([3,3]);
+  g.beginPath(); g.moveTo(nowX,pad.t); g.lineTo(nowX,pad.t+ph); g.stroke();
+  g.setLineDash([]);
+  g.fillStyle = css("var(--txt-dim)"); g.font="10px "+css("var(--sans)");
+  g.textAlign="left"; g.textBaseline="top";
+  g.fillText("now", nowX+5, pad.t+2);
+  g.textAlign="right";
+  g.fillText("observed", nowX-5, pad.t+2);
+  g.textAlign="left";
+  g.fillStyle = css("var(--danger)");
+  g.fillText("forecast →", nowX+5, pad.t+15);
+
+  // ground-truth malicious bands, when the capture is labelled
+  timeline.forEach((p,i)=>{
+    if(p.is_malicious){
+      g.fillStyle = css("var(--danger-wash)");
+      const x0 = X(Math.max(0,i-0.5)), x1 = X(Math.min(nPast-1,i+0.5));
+      g.fillRect(x0, pad.t, Math.max(1,x1-x0), ph);
+    }
+  });
+
+  // uncertainty band across the forecast
+  if(nFut){
+    g.beginPath();
+    g.moveTo(nowX, Y(timeline[nPast-1].risk));
+    forecast.forEach((f,i)=> g.lineTo(X(nPast+i), Y(f.risk_high)));
+    for(let i=nFut-1;i>=0;i--) g.lineTo(X(nPast+i), Y(forecast[i].risk_low));
+    g.lineTo(nowX, Y(timeline[nPast-1].risk));
+    g.closePath();
+    g.fillStyle = "rgba(211,32,64,.14)"; g.fill();
+  }
+
+  // observed risk
+  g.beginPath();
+  timeline.forEach((p,i)=> i?g.lineTo(X(i),Y(p.risk)):g.moveTo(X(i),Y(p.risk)));
+  g.strokeStyle = css("var(--accent)"); g.lineWidth=2; g.stroke();
+
+  // forecast mean
+  g.beginPath();
+  g.moveTo(nowX, Y(timeline[nPast-1].risk));
+  forecast.forEach((f,i)=> g.lineTo(X(nPast+i), Y(f.risk)));
+  g.strokeStyle = css("var(--danger)"); g.lineWidth=2; g.setLineDash([5,4]); g.stroke();
+  g.setLineDash([]);
+
+  // forecast points coloured by predicted stage
+  forecast.forEach((f,i)=>{
+    g.beginPath(); g.arc(X(nPast+i), Y(f.risk), 3, 0, Math.PI*2);
+    g.fillStyle = css(STAGE_COLORS[f.stage]||"var(--danger)"); g.fill();
+  });
+
+  // x labels
+  g.fillStyle = css("var(--txt-faint)"); g.font="10px "+css("var(--mono)");
+  g.textAlign="center"; g.textBaseline="top";
+  const step = Math.max(1, Math.floor(nPast/6));
+  for(let i=0;i<nPast;i+=step) g.fillText("-"+(nPast-1-i)+"m", X(i), pad.t+ph+7);
+  if(nFut) g.fillText("+"+nFut+"m", X(total-1), pad.t+ph+7);
+}
+
+function drawKillStrip(cv, timeline, upto){
+  // One block per minute, coloured by the stage the model inferred. The whole
+  // capture at a glance: a flat blue run turning red is a bot finishing
+  // reconnaissance and starting to exfiltrate, and that reads instantly in a
+  // way a stage label on a single window never does.
+  const {g,w,h} = setupCanvas(cv, 54);
+  g.clearRect(0,0,w,h);
+  const n = timeline.length;
+  if(!n) return;
+  const bw = w/n, top = 6, bh = 30;
+
+  timeline.forEach((p,i)=>{
+    const future = (upto != null && i > upto);
+    g.globalAlpha = future ? 0.16 : 1;
+    g.fillStyle = css(STAGE_COLORS[p.stage] || "var(--txt-faint)");
+    g.fillRect(i*bw, top, Math.max(1, bw+0.5), bh);
+    g.globalAlpha = 1;
+  });
+
+  // Ground-truth ticks under the strip, so predicted stage and reality can be
+  // compared without switching charts.
+  timeline.forEach((p,i)=>{
+    if(p.is_malicious){
+      g.fillStyle = css("var(--danger)");
+      g.fillRect(i*bw, top+bh+3, Math.max(1,bw+0.5), 3);
+    }
+  });
+
+  if(upto != null && upto < n-1){
+    const x = (upto+1)*bw;
+    g.strokeStyle = css("var(--txt)"); g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(x, top-3); g.lineTo(x, top+bh+3); g.stroke();
+  }
+
+  g.fillStyle = css("var(--txt-faint)"); g.font = "10px "+css("var(--mono)");
+  g.textAlign = "left"; g.textBaseline = "top";
+  g.fillText("ground truth", 0, top+bh+9);
+  g.textAlign = "right";
+  g.fillText(n+" minutes", w, top+bh+9);
+}
+
+function drawGraph(cv, data, height){
+  // Force-directed layout, hand-rolled. Three forces: repulsion between every
+  // pair, spring attraction along edges, and a weak pull to the centre so
+  // disconnected nodes do not drift off-canvas.
+  const {g,w,h} = setupCanvas(cv, height);
+  const nodes = data.nodes, edges = data.edges;
+  if(!nodes.length){
+    g.fillStyle=css("var(--txt-faint)"); g.font="13px "+css("var(--sans)");
+    g.textAlign="center"; g.fillText("No topology to draw.", w/2, h/2); return;
+  }
+
+  const idx = new Map(nodes.map((n,i)=>[n.id,i]));
+  const P = nodes.map((n,i)=>({
+    x: w/2 + Math.cos(i/nodes.length*6.283)*Math.min(w,h)*0.33 + (Math.random()-0.5)*20,
+    y: h/2 + Math.sin(i/nodes.length*6.283)*Math.min(w,h)*0.33 + (Math.random()-0.5)*20,
+    vx:0, vy:0
+  }));
+  const E = edges.map(e=>({s:idx.get(e.source), t:idx.get(e.target), m:e.malicious}))
+                 .filter(e=>e.s!=null && e.t!=null);
+
+  for(let step=0; step<220; step++){
+    for(let i=0;i<P.length;i++){
+      for(let j=i+1;j<P.length;j++){
+        let dx=P[j].x-P[i].x, dy=P[j].y-P[i].y;
+        let d2=dx*dx+dy*dy+0.01, d=Math.sqrt(d2);
+        const rep = 2600/d2;
+        const fx=dx/d*rep, fy=dy/d*rep;
+        P[i].vx-=fx; P[i].vy-=fy; P[j].vx+=fx; P[j].vy+=fy;
+      }
+    }
+    E.forEach(e=>{
+      const a=P[e.s], b=P[e.t];
+      let dx=b.x-a.x, dy=b.y-a.y, d=Math.sqrt(dx*dx+dy*dy)+0.01;
+      const f=(d-70)*0.012;
+      const fx=dx/d*f, fy=dy/d*f;
+      a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
+    });
+    P.forEach(p=>{
+      p.vx += (w/2-p.x)*0.0016; p.vy += (h/2-p.y)*0.0016;
+      p.vx*=0.82; p.vy*=0.82;
+      p.x+=p.vx; p.y+=p.vy;
+      p.x=Math.max(22,Math.min(w-22,p.x)); p.y=Math.max(22,Math.min(h-22,p.y));
+    });
+  }
+
+  g.clearRect(0,0,w,h);
+  E.forEach(e=>{
+    g.beginPath(); g.moveTo(P[e.s].x,P[e.s].y); g.lineTo(P[e.t].x,P[e.t].y);
+    g.strokeStyle = e.m ? css("var(--danger)") : css("var(--line)");
+    g.lineWidth = e.m ? 1.4 : 0.6;
+    g.globalAlpha = e.m ? 0.75 : 0.5;
+    g.stroke(); g.globalAlpha = 1;
+  });
+
+  nodes.forEach((n,i)=>{
+    const p=P[i];
+    const r = n.monitored ? 5 + Math.min(7, Math.log10(n.flows+1)*2.6) : 3;
+    let fill;
+    if(!n.monitored) fill = css("var(--txt-faint)");
+    else if(n.risk >= 0.5) fill = css("var(--danger)");
+    else if(n.risk >= 0.25) fill = css("var(--warn)");
+    else fill = css("var(--safe)");
+
+    if(n.monitored && n.risk >= 0.5){
+      g.beginPath(); g.arc(p.x,p.y,r+7,0,6.283);
+      g.fillStyle="rgba(211,32,64,.18)"; g.fill();
+    }
+    g.beginPath(); g.arc(p.x,p.y,r,0,6.283);
+    g.fillStyle=fill; g.fill();
+    g.strokeStyle=css("var(--panel)"); g.lineWidth=1.2; g.stroke();
+
+    if(n.monitored && n.risk >= 0.5){
+      g.fillStyle=css("var(--txt)"); g.font="600 11px "+css("var(--mono)");
+      g.textAlign="center"; g.textBaseline="bottom";
+      g.fillText(n.id, p.x, p.y-r-9);
+    }
+  });
+}
+
+function drawSurprise(cv, timeline){
+  const {g,w,h} = setupCanvas(cv, 110);
+  const pad = {l:44, r:16, t:12, b:24};
+  const pw = w-pad.l-pad.r, ph = h-pad.t-pad.b;
+  g.clearRect(0,0,w,h);
+
+  const vals = timeline.map(p=>p.surprise ?? 0);
+  const max = Math.max(...vals, 1e-6);
+  const X = i => pad.l + (vals.length<=1?0:(i/(vals.length-1))*pw);
+  const Y = v => pad.t + (1-v/max)*ph;
+
+  g.strokeStyle = css("var(--line)");
+  for(let f=0; f<=1.001; f+=0.5){
+    const y = pad.t + (1-f)*ph;
+    g.beginPath(); g.moveTo(pad.l,y); g.lineTo(w-pad.r,y); g.stroke();
+    g.fillStyle=css("var(--txt-faint)"); g.font="10px "+css("var(--mono)");
+    g.textAlign="right"; g.textBaseline="middle";
+    g.fillText((f*max).toFixed(1), pad.l-8, y);
+  }
+
+  // ground-truth malicious shading, same convention as the forecast chart
+  timeline.forEach((p,i)=>{
+    if(p.is_malicious){
+      g.fillStyle=css("var(--danger-wash)");
+      const x0=X(Math.max(0,i-0.5)), x1=X(Math.min(vals.length-1,i+0.5));
+      g.fillRect(x0,pad.t,Math.max(1,x1-x0),ph);
+    }
+  });
+
+  g.beginPath();
+  vals.forEach((v,i)=> i?g.lineTo(X(i),Y(v)):g.moveTo(X(i),Y(v)));
+  g.strokeStyle=css("var(--initial)"); g.lineWidth=2; g.stroke();
+
+  g.fillStyle="rgba(122,69,209,.13)";
+  g.lineTo(X(vals.length-1), pad.t+ph); g.lineTo(X(0), pad.t+ph); g.closePath(); g.fill();
+}
+
+function drawAttention(cv, attn){
+  const {g,w,h} = setupCanvas(cv, 92);
+  g.clearRect(0,0,w,h);
+  if(!attn || !attn.length){
+    g.fillStyle=css("var(--txt-faint)"); g.font="12px "+css("var(--sans)");
+    g.textAlign="center"; g.fillText("No attention mass to show.", w/2, h/2); return;
+  }
+  const sorted = [...attn].sort((a,b)=>a.window_offset-b.window_offset);
+  const max = Math.max(...sorted.map(a=>a.weight), 1e-6);
+  const bw = Math.min(60, (w-20)/sorted.length - 8);
+  const gap = (w-20-bw*sorted.length)/Math.max(1,sorted.length-1);
+  sorted.forEach((a,i)=>{
+    const x = 10 + i*(bw+gap), bh = Math.max(3,(a.weight/max)*(h-34));
+    g.fillStyle = css("var(--accent)"); g.globalAlpha = .35 + .65*(a.weight/max);
+    g.fillRect(x, h-24-bh, bw, bh); g.globalAlpha=1;
+    g.fillStyle = css("var(--txt-faint)"); g.font="10px "+css("var(--mono)");
+    g.textAlign="center"; g.textBaseline="top";
+    g.fillText(a.window_offset===0?"now":a.window_offset+"m", x+bw/2, h-18);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Rendering                                                           */
+/* ------------------------------------------------------------------ */
+
+function riskClass(v){ return v>=0.5?"danger":v>=0.25?"warn":"safe"; }
+
+function killChain(cur, pred){
+  const stages = META.stages.filter(s=>s.id>0);
+  return `<div class="chain">` + stages.map(s=>{
+    const isNow = s.id===cur, isPred = s.id===pred && pred!==cur;
+    const cls = isNow?"now":isPred?"pred":"";
+    const badge = isNow?`<span class="badge">now</span>`
+                : isPred?`<span class="badge">predicted</span>`:"";
+    return `<div class="stage ${cls}">${badge}
+      <div class="nm">${s.name}</div>
+      <div class="tid">${s.technique_id}</div></div>`;
+  }).join("") + `</div>`;
+}
+
+function featureBars(items){
+  // Display the share of attribution mass, not the raw value. Integrated
+  // gradients on a saturated logit produce tiny absolute numbers that all
+  // render as "0.00" while still carrying a meaningful ranking.
+  const max = Math.max(...items.map(f=>Math.abs(f.share ?? f.contribution)), 1e-9);
+  return items.map(f=>{
+    const mag = Math.abs(f.share ?? f.contribution);
+    const pct = mag/max*50;
+    const pos = f.contribution>0;
+    const label = f.share!=null ? (100*f.share).toFixed(1)+"%"
+                                : f.contribution.toExponential(1);
+    return `<div class="feat">
+      <div class="top">
+        <span class="nm">${f.label} <span class="tag ${f.level}">${f.level}</span></span>
+        <span class="vl">${pos?"↑":"↓"} ${label}</span>
+      </div>
+      <div class="bar"><span style="${pos?"left:50%":"right:50%"};width:${pct}%;
+        background:${pos?css("var(--danger)"):css("var(--safe)")}"></span></div>
+    </div>`;
+  }).join("");
+}
+
+/* ------------------------------------------------------------------ */
+/* Replay. Frames come pre-computed from /api/replay — one batched pass
+   on the server rather than a request per frame, so playback is smooth
+   and does not hammer the model.                                       */
+/* ------------------------------------------------------------------ */
+
+let REPLAY = null, RTIMER = null, RPOS = 0, RSPEED = 400;
+// False until playback actually starts, so the static view survives until then.
+let RACTIVE = false;
+
+function replayStop(){
+  if(RTIMER){ clearInterval(RTIMER); RTIMER = null; }
+  const b = $("#playBtn"); if(b) b.textContent = "▶  Play";
+}
+
+function replayRender(){
+  if(!REPLAY) return;
+  RACTIVE = true;
+  const f = REPLAY.frames[RPOS];
+  const cut = f.index;                       // last observed window index
+  const seen = REPLAY.timeline.slice(0, cut+1);
+
+  const forecast = f.forecast.map((v,i)=>({
+    step: i+1,
+    risk: v,
+    // Playback shows the mean trajectory; the percentile band belongs to the
+    // static view, where there is room to explain what it means.
+    risk_low: v, risk_high: v,
+    stage: f.forecast_stage[i],
+    stage_name: (META.stages[f.forecast_stage[i]]||{}).name || "",
+  }));
+
+  drawForecast($("#fcChart"), seen, forecast, 0.5);
+  drawKillStrip($("#stripChart"), REPLAY.timeline, cut);
+
+  const mins = REPLAY.timeline.length;
+  $("#rClock").textContent =
+    `minute ${cut+1} / ${mins}  ·  risk ${(100*f.risk).toFixed(1)}%  ·  ` +
+    `${(META.stages[f.stage]||{}).name || "?"}`;
+  $("#rSlider").value = RPOS;
+}
+
+function replayStep(){
+  if(!REPLAY) return;
+  RPOS++;
+  if(RPOS >= REPLAY.frames.length){ RPOS = REPLAY.frames.length-1; replayStop(); }
+  replayRender();
+}
+
+function replayToggle(){
+  if(RTIMER){ replayStop(); return; }
+  if(REPLAY && RPOS >= REPLAY.frames.length-1) RPOS = 0;
+  $("#playBtn").textContent = "❚❚  Pause";
+  RTIMER = setInterval(replayStep, RSPEED);
+}
+
+async function replayLoad(scenario, host){
+  replayStop(); REPLAY = null; RACTIVE = false;
+  try{
+    REPLAY = await api(`/api/replay?scenario=${scenario}&host=${encodeURIComponent(host)}`);
+    RPOS = 0;
+    const s = $("#rSlider");
+    s.max = REPLAY.frames.length-1; s.value = 0; s.disabled = false;
+    $("#playBtn").disabled = false;
+    // Deliberately do NOT render frame 0 here. Until someone presses Play the
+    // charts should still show the whole capture - that is what the kill-chain
+    // strip is for, and dimming 90% of it before playback has even started
+    // hides the one thing the panel exists to show.
+    $("#rClock").textContent =
+      `${REPLAY.frames.length} frames ready · press Play`;
+  }catch(e){
+    $("#rClock").textContent = "replay unavailable: " + e.message;
+    $("#playBtn").disabled = true; $("#rSlider").disabled = true;
+  }
+}
+
+function renderForecast(d){
+  CURRENT = d;
+  replayStop(); REPLAY = null;
+  const p = d.prediction, c = d.current, ex = d.explanation || {};
+  const eta = p.seconds_to_alert!=null ? Math.round(p.seconds_to_alert/60)+" min" : "no crossing";
+
+  $("#forecastTab").innerHTML = `
+    <div class="row k3">
+      <div class="card">
+        <h3>Current risk</h3>
+        <div class="stat ${riskClass(c.risk)}">${fmtPct(c.risk)}</div>
+        <div class="stat-sub">${c.stage.name} &middot; ${(100*c.stage_confidence).toFixed(0)}% confidence</div>
+      </div>
+      <div class="card">
+        <h3>Peak forecast risk</h3>
+        <div class="stat ${riskClass(p.peak_risk)}">${fmtPct(p.peak_risk)}</div>
+        <div class="stat-sub">${p.is_progression
+          ? "<span style='color:var(--danger)'>Kill-chain progression predicted</span>"
+          : "No stage advance predicted"}</div>
+      </div>
+      <div class="card">
+        <h3>Time to threshold</h3>
+        <div class="stat ${p.steps_to_alert!=null?"warn":"safe"}">${eta}</div>
+        <div class="stat-sub">at ${fmtPct(p.threshold)} alert threshold</div>
+      </div>
+    </div>
+
+    <div class="row"><div class="card">
+      <h3>Infiltration probability &mdash; observed and forecast</h3>
+      <div class="replay">
+        <button class="play" id="playBtn" disabled>▶&nbsp; Play</button>
+        <button id="resetBtn">⏮ Reset</button>
+        <select id="rSpeed">
+          <option value="700">Slow</option>
+          <option value="400" selected>Normal</option>
+          <option value="150">Fast</option>
+        </select>
+        <input type="range" id="rSlider" min="0" max="0" value="0" disabled>
+        <span class="clock" id="rClock">loading replay&hellip;</span>
+      </div>
+      <canvas id="fcChart"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>Observed (filtered)</span>
+        <span><i style="background:var(--danger)"></i>Forecast (imagined rollout)</span>
+        <span><i style="background:rgba(211,32,64,.30)"></i>10th&ndash;90th percentile</span>
+        <span><i style="background:var(--warn)"></i>Alert threshold</span>
+        <span><i style="background:var(--danger-wash)"></i>Ground-truth malicious window</span>
+      </div>
+      <div class="hint">Left of the divider the model sees traffic. Right of it
+        it sees nothing &mdash; each step is rolled forward through the learned
+        prior, so the band widens as evidence runs out. Press <strong>Play</strong>
+        to watch the forecast being made minute by minute, then time advance
+        past it.</div>
+    </div></div>
+
+    <div class="row"><div class="card">
+      <h3>Kill-chain timeline &mdash; whole capture at a glance</h3>
+      <canvas id="stripChart"></canvas>
+      <div class="striplegend">
+        ${META.stages.map(s=>
+          `<span><i style="background:${STAGE_COLORS[s.id]}"></i>${s.name}</span>`
+        ).join("")}
+        <span><i style="background:var(--danger);height:3px"></i>ground-truth malicious</span>
+      </div>
+      <div class="hint">One block per minute, coloured by the stage the model
+        inferred. The red ticks underneath are the dataset's own labels, so
+        prediction and reality sit on the same axis.</div>
+    </div></div>
+
+    <div class="row"><div class="card">
+      <h3>Model surprise &mdash; unsupervised novelty</h3>
+      <canvas id="surpChart"></canvas>
+      <div class="hint"><strong>Read this one backwards.</strong> Surprise is the
+        error between what the world model's prior expected and what the network
+        actually did &mdash; no labels involved. On CTU-13 botnet traffic is
+        <em>less</em> surprising than human traffic (mean 0.35 vs 0.49), because
+        beaconing and spam are machine-generated and regular while real users are
+        erratic. So <em>low</em> surprise on a host the risk score flags is
+        corroborating evidence of automation. It is a novelty channel, not a
+        detector, and is never blended into the risk score.</div>
+    </div></div>
+
+    <div class="row"><div class="card">
+      <h3>MITRE ATT&amp;CK kill chain</h3>
+      ${killChain(c.stage.id, p.peak_stage.id)}
+      <div class="hint">Predicted stage: <strong>${p.peak_stage.name}</strong>
+        (${p.peak_stage.tactic_id} &middot; ${p.peak_stage.technique_id}
+        ${p.peak_stage.technique})</div>
+    </div></div>
+
+    ${ex.narrative?`<div class="row"><div class="card">
+      <h3>Decision support</h3><div class="narr">${ex.narrative}</div></div></div>`:""}
+
+    <div class="row k2">
+      <div class="card">
+        <h3>Feature attribution &mdash; integrated gradients</h3>
+        ${ex.feature_attribution?featureBars(ex.feature_attribution):"<div class='hint'>unavailable</div>"}
+        ${ex.level_contribution?`<div class="hint">Signal split:
+          flow-level ${fmtPct(ex.level_contribution.flow)},
+          packet-level ${fmtPct(ex.level_contribution.packet)}</div>`:""}
+      </div>
+      <div class="card">
+        <h3>Expected state change by ${d.forecast.length} windows ahead</h3>
+        <table><thead><tr><th>Feature</th><th class="num">Now</th>
+          <th class="num">Predicted</th></tr></thead><tbody>
+          ${(ex.predicted_state_change||[]).map(r=>`<tr>
+            <td>${r.label} <span class="tag ${r.level}">${r.level}</span></td>
+            <td class="num">${r.current.toFixed(r.current<10?2:0)}</td>
+            <td class="num" style="color:${r.relative_change>0?"var(--danger)":"var(--safe)"}">
+              ${r.predicted.toFixed(r.predicted<10?2:0)}</td></tr>`).join("")}
+        </tbody></table>
+        <div class="hint">Read off the world model's decoder: what it thinks
+          the traffic itself will look like, not just the risk score.</div>
+      </div>
+    </div>
+
+    <div class="row"><div class="card">
+      <h3>Temporal attention &mdash; which past windows drove this</h3>
+      <canvas id="attnChart"></canvas>
+      <div class="hint">These are the causal-attention weights the prediction
+        heads actually consumed, not a post-hoc approximation.</div>
+    </div></div>`;
+
+  drawForecast($("#fcChart"), d.timeline, d.forecast, p.threshold);
+  drawKillStrip($("#stripChart"), d.timeline, null);
+  drawSurprise($("#surpChart"), d.timeline);
+  drawAttention($("#attnChart"), ex.temporal_attention);
+
+  $("#playBtn").onclick = replayToggle;
+  // Reset returns to the untouched static view, not to frame 0 of playback.
+  $("#resetBtn").onclick = ()=>{
+    replayStop(); RPOS = 0; RACTIVE = false;
+    drawForecast($("#fcChart"), CURRENT.timeline, CURRENT.forecast,
+                 CURRENT.prediction.threshold);
+    drawKillStrip($("#stripChart"), CURRENT.timeline, null);
+    $("#rSlider").value = 0;
+    if(REPLAY) $("#rClock").textContent =
+      `${REPLAY.frames.length} frames ready · press Play`;
+  };
+  $("#rSpeed").onchange = e=>{
+    RSPEED = +e.target.value;
+    if(RTIMER){ replayStop(); replayToggle(); }
+  };
+  $("#rSlider").oninput = e=>{ replayStop(); RPOS = +e.target.value; replayRender(); };
+
+  if(d.scenario != null) replayLoad(d.scenario, d.host);
+  else $("#rClock").textContent = "replay is available for prepared captures";
+}
+
+async function loadTopology(){
+  const el = $("#topologyTab");
+  if(SCENARIO == null){ el.innerHTML = `<div class="msg">Pick a capture first.</div>`; return; }
+  el.innerHTML = `<div class="msg"><span class="spin"></span>Laying out the network…</div>`;
+  try{
+    const g = await api(`/api/graph?scenario=${SCENARIO}`);
+    const flagged = g.nodes.filter(n=>n.monitored && n.risk >= 0.5);
+    const T = g.totals || {};
+    el.innerHTML = `
+      <div class="row k3">
+        <div class="card"><h3>Hosts in capture</h3>
+          <div class="stat">${(T.hosts||g.nodes.length).toLocaleString()}</div>
+          <div class="stat-sub">${g.nodes.length} drawn below &mdash; the busiest
+            plus everything touching malicious traffic</div></div>
+        <div class="card"><h3>Malicious peers contacted</h3>
+          <div class="stat danger">${(T.malicious_peers||0).toLocaleString()}</div>
+          <div class="stat-sub">across ${(T.malicious_pairs||0).toLocaleString()}
+            host pairs &mdash; the spam and C2 fan-out</div></div>
+        <div class="card"><h3>Flagged hosts</h3>
+          <div class="stat ${flagged.length?"danger":"safe"}">${flagged.length}</div>
+          <div class="stat-sub">${flagged.map(n=>n.id).join(", ") || "none above threshold"}</div></div>
+      </div>
+      <div class="row"><div class="card">
+        <h3>Network topology &mdash; who talks to whom</h3>
+        <canvas id="graphChart"></canvas>
+        <div class="legend">
+          <span><i style="background:var(--danger);height:11px;width:11px;border-radius:50%"></i>Flagged host</span>
+          <span><i style="background:var(--warn);height:11px;width:11px;border-radius:50%"></i>Elevated risk</span>
+          <span><i style="background:var(--safe);height:11px;width:11px;border-radius:50%"></i>Monitored, low risk</span>
+          <span><i style="background:var(--txt-faint);height:8px;width:8px;border-radius:50%"></i>External peer</span>
+          <span><i style="background:var(--danger)"></i>Malicious connection</span>
+        </div>
+        <div class="hint">Node size follows traffic volume; colour is the risk
+          score from the same model the Forecast tab uses. Only the busiest
+          hosts are drawn &mdash; a full capture has hundreds of peers and the
+          point of this view is to see the compromised machine sitting inside a
+          legible neighbourhood.</div>
+      </div></div>`;
+    drawGraph($("#graphChart"), g, 560);
+    TOPOLOGY = g;
+  }catch(e){ el.innerHTML = `<div class="msg">${e.message}</div>`; }
+}
+
+function renderHosts(list, onPick){
+  $("#hostList").innerHTML = list.length ? list.map((h,i)=>{
+    // Rank on the strongest evidence anywhere in the host's history: a machine
+    // that was loud an hour ago still deserves the analyst's attention.
+    const r = Math.max(h.observed_peak_risk ?? 0, h.peak_forecast_risk ?? 0);
+    const cls = r>=0.5?"hi":r>=0.25?"md":"";
+    const surp = h.surprise!=null ? ` &middot; surprise ${h.surprise.toFixed(1)}` : "";
+    return `<div class="host${i===0?" on":""}" data-host="${h.host}">
+      <div><div class="ip">${h.host}</div>
+        <div class="meta">${h.predicted_stage} &middot; ${h.n_windows}w${surp}</div></div>
+      <span class="risk-pill ${cls}">${fmtPct(r)}</span></div>`;
+  }).join("") : `<div class="msg" style="padding:20px;font-size:12px">No host has enough windows.</div>`;
+
+  $("#hostList").querySelectorAll(".host").forEach(el=>{
+    el.onclick = ()=>{
+      $("#hostList").querySelectorAll(".host").forEach(x=>x.classList.remove("on"));
+      el.classList.add("on");
+      onPick(el.dataset.host);
+    };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Data                                                                */
+/* ------------------------------------------------------------------ */
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  if(!r.ok){
+    let detail = r.statusText;
+    try{ detail = (await r.json()).detail || detail; }catch(e){}
+    throw new Error(detail);
+  }
+  return r.json();
+}
+function busy(msg){ $("#forecastTab").innerHTML = `<div class="msg"><span class="spin"></span>${msg}</div>`; }
+function fail(msg){ $("#forecastTab").innerHTML = `<div class="msg">${msg}</div>`; }
+
+async function loadScenario(id){
+  SCENARIO = id; UPLOAD = null; TOPOLOGY = null;
+  replayStop();
+  busy("Ranking hosts by forecast risk…");
+  $("#hostList").innerHTML = "";
+  try{
+    const d = await api(`/api/hosts?scenario=${id}`);
+    renderHosts(d.hosts, h => loadHost(h));
+    if(d.hosts.length) loadHost(d.hosts[0].host); else fail("No analysable host in this capture.");
+  }catch(e){ fail(e.message); }
+}
+
+async function loadHost(host){
+  if(UPLOAD){
+    const h = UPLOAD.hostsDetail && UPLOAD.hostsDetail[host];
+    if(h){ renderForecast(h); return; }
+  }
+  busy(`Rolling the world model forward for ${host}…`);
+  try{ renderForecast(await api(`/api/analyse?scenario=${SCENARIO}&host=${encodeURIComponent(host)}`)); }
+  catch(e){ fail(e.message); }
+}
+
+async function loadBenchmark(){
+  const el = $("#benchmarkTab");
+  el.innerHTML = `<div class="msg"><span class="spin"></span>Loading benchmark…</div>`;
+  try{
+    const b = await api("/api/benchmark");
+    const rows = b.detection.map(r=>{
+      const best = r.model.toLowerCase().includes("world");
+      return `<tr class="${best?"best":""}">
+        <td>${r.model}</td>
+        <td class="num">${r.precision.toFixed(3)}</td>
+        <td class="num">${r.recall.toFixed(3)}</td>
+        <td class="num">${r.f1.toFixed(3)}</td>
+        <td class="num">${r.false_positive_rate.toFixed(3)}</td>
+        <td class="num">${isFinite(r.roc_auc)?r.roc_auc.toFixed(3):"n/a"}</td></tr>`;
+    }).join("");
+    const hz = b.forecast_by_horizon.map(r=>`<tr>
+        <td class="num">+${r.step}</td><td class="num">${r.seconds_ahead.toFixed(0)}s</td>
+        <td class="num">${r.f1.toFixed(3)}</td>
+        <td class="num">${isFinite(r.roc_auc)?r.roc_auc.toFixed(3):"n/a"}</td>
+        <td class="num">${r.false_positive_rate.toFixed(3)}</td></tr>`).join("");
+
+    el.innerHTML = `
+      <div class="row"><div class="card">
+        <h3>Infiltration prediction on unseen malware families</h3>
+        <table><thead><tr><th>Model</th><th class="num">Precision</th>
+          <th class="num">Recall</th><th class="num">F1</th><th class="num">FPR</th>
+          <th class="num">ROC-AUC</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="hint">Trained on scenarios ${b.train_scenarios.join(", ")};
+          tested on ${b.test_scenarios.join(", ")} &mdash; malware families the
+          model never saw. Thresholds were selected on the validation split and
+          frozen before testing.</div>
+      </div></div>
+      <div class="row"><div class="card">
+        <h3>Forecast quality by horizon</h3>
+        <table><thead><tr><th class="num">Steps</th><th class="num">Ahead</th>
+          <th class="num">F1</th><th class="num">ROC-AUC</th>
+          <th class="num">FPR</th></tr></thead><tbody>${hz}</tbody></table>
+        <div class="hint">Each row scores predictions made without observing
+          that window &mdash; the model was cut off and rolled forward.</div>
+      </div></div>`;
+  }catch(e){
+    el.innerHTML = `<div class="msg">${e.message}<br><br>
+      Run <code>python -m src.evaluate</code> to generate it.</div>`;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Wiring                                                              */
+/* ------------------------------------------------------------------ */
+
+$("#uploadBtn").onclick = ()=> $("#file").click();
+$("#file").onchange = async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  $("#uploadHint").textContent = `Processing ${f.name}…`;
+  busy(`Extracting features from ${f.name}…`);
+  const fd = new FormData(); fd.append("file", f);
+  try{
+    const d = await api("/api/upload", {method:"POST", body:fd});
+    UPLOAD = {hostsDetail:{[d.focus.host]: d.focus}};
+    $("#uploadHint").innerHTML = `${d.ingest.n_flows.toLocaleString()} flows &middot;
+      ${d.ingest.n_cells} windows &middot; ${d.ingest.n_hosts} hosts<br>
+      packet features: ${d.ingest.packet_features?"yes":"flow-level only"}`;
+    renderHosts(d.hosts, h=>{
+      if(UPLOAD.hostsDetail[h]) renderForecast(UPLOAD.hostsDetail[h]);
+      else fail("Re-upload to analyse a different host in detail.");
+    });
+    renderForecast(d.focus);
+  }catch(err){
+    $("#uploadHint").textContent = "";
+    fail(err.message);
+  }
+  e.target.value = "";
+};
+
+function selectTab(which){
+    const t = document.querySelector(`.tab[data-tab="${which}"]`);
+    if(!t) return;
+    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
+    t.classList.add("on");
+    // Playback keeps running otherwise, burning a timer behind a hidden canvas.
+    if(which !== "forecast") replayStop();
+    $("#forecastTab").style.display  = which==="forecast" ?"":"none";
+    $("#topologyTab").style.display  = which==="topology" ?"":"none";
+    $("#benchmarkTab").style.display = which==="benchmark"?"":"none";
+    if(which==="benchmark") loadBenchmark();
+    if(which==="topology" && !TOPOLOGY) loadTopology();
+}
+
+document.querySelectorAll(".tab").forEach(t=>{
+  t.onclick = ()=>{
+    // Reflected in the URL so a tab can be opened directly - handy when the
+    // demo needs to start on the topology view rather than clicking to it.
+    location.hash = t.dataset.tab;
+    selectTab(t.dataset.tab);
+  };
+});
+window.addEventListener("hashchange", ()=> selectTab(location.hash.slice(1)));
+
+$("#scenario").onchange = e=> loadScenario(+e.target.value);
+
+window.addEventListener("resize", ()=>{
+  if(TOPOLOGY && $("#graphChart")) drawGraph($("#graphChart"), TOPOLOGY, 560);
+  if(!CURRENT) return;
+  const fc = $("#fcChart"), at = $("#attnChart"), sp = $("#surpChart");
+  const st = $("#stripChart");
+
+  // Hand back to the replay renderer when playback owns the chart. Redrawing
+  // CURRENT unconditionally used to wipe the replay frame and snap the view
+  // back to the full static timeline on any resize.
+  if(REPLAY && RACTIVE){
+    replayRender();
+  }else{
+    if(fc) drawForecast(fc, CURRENT.timeline, CURRENT.forecast, CURRENT.prediction.threshold);
+    if(st) drawKillStrip(st, CURRENT.timeline, null);
+  }
+  if(sp) drawSurprise(sp, CURRENT.timeline);
+  if(at) drawAttention(at, (CURRENT.explanation||{}).temporal_attention);
+});
+
+(async function init(){
+  try{
+    META = await api("/api/meta");
+    if(!META.model_ready){
+      $("#brandSub").textContent = "no checkpoint";
+      fail("No trained model yet. Run <code>python -m src.train</code>, then reload.");
+      return;
+    }
+    const m = META.model;
+    $("#brandSub").textContent =
+      `${m.parameters.toLocaleString()} params · ${m.features} features · ${m.window_seconds}s windows`;
+
+    $("#scenario").innerHTML = META.scenarios.map(s=>
+      `<option value="${s.id}">Scenario ${s.id} — ${s.family}</option>`).join("");
+    if(META.scenarios.length) loadScenario(META.scenarios[0].id);
+    else fail("No prepared captures. Run <code>python -m src.prepare_data</code>.");
+
+    const want = location.hash.slice(1);
+    if(want && want !== "forecast") selectTab(want);
+  }catch(e){ fail(e.message); }
+})();
+</script>
+</body>
+</html>
