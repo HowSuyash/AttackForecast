@@ -1,0 +1,26 @@
+# Render blueprint. Connect the GitHub repository at
+# https://dashboard.render.com/blueprints and Render picks this up.
+#
+# Free tier caveats, stated up front so nobody is surprised during a demo:
+#   - 512 MB RAM. Torch is ~250 MB resident and the rest of the stack pushes
+#     close to the ceiling, which is why the image installs
+#     requirements-runtime.txt rather than the full set.
+#   - The service sleeps after 15 minutes idle and cold-starts in ~60 s. Open
+#     the page a few minutes before presenting.
+#
+# The local dashboard is the primary demonstration; this hosted copy exists so
+# a link can be shared. The problem statement requires the interface to run
+# fully offline, and it does - nothing here is a runtime dependency of the app.
+
+services:
+  - type: web
+    name: network-attack-forecasting
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    healthCheckPath: /api/meta
+    envVars:
+      # Render injects PORT; the Dockerfile's CMD honours it.
+      - key: PYTHONUNBUFFERED
+        value: "1"

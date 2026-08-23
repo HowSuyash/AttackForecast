@@ -1,0 +1,20 @@
+# Serving-only dependencies.
+#
+# requirements.txt is the full set: it includes scikit-learn and scipy, which
+# `src.train` and `src.evaluate` need for the baselines and metrics. The server
+# imports neither - verified by walking the import graph of server/ and src/
+# with train/evaluate/baseline/prepare_data excluded - so shipping them into a
+# container costs roughly 150 MB of image and resident memory for code that
+# never executes.
+#
+# That margin matters: free hosting tiers commonly cap at 512 MB, and torch
+# alone is ~250 MB resident.
+
+numpy>=2.0
+pandas>=2.2
+pyarrow>=16.0          # parquet reader for the prepared state cells
+torch>=2.5             # install from the CPU index; see Dockerfile
+scapy>=2.6             # PCAP parsing on the upload path
+fastapi>=0.109
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9  # multipart form parsing for uploads

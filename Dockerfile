@@ -19,9 +19,14 @@ WORKDIR /app
 # Torch first, from the CPU index. The default PyPI wheel drags in the CUDA
 # runtime - roughly 2 GB of libraries this project never touches, since the
 # model is 138k parameters and trains on CPU in minutes.
-COPY requirements.txt .
+#
+# requirements-runtime.txt, not requirements.txt: the server never imports
+# scikit-learn or scipy (they belong to training and evaluation), and leaving
+# them out saves ~150 MB of image and resident memory. Free tiers cap at 512 MB
+# and torch is already ~250 MB of that.
+COPY requirements-runtime.txt .
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements-runtime.txt
 
 COPY src/ ./src/
 COPY server/ ./server/
