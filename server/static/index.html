@@ -66,6 +66,10 @@ select,.btn{width:100%;background:var(--panel-2);color:var(--txt);
            background:var(--panel-2);color:var(--txt-dim);white-space:nowrap}
 .risk-pill.hi{background:var(--danger-wash);color:var(--danger);font-weight:600}
 .risk-pill.md{background:var(--warn-wash);color:var(--warn);font-weight:600}
+.why{font-size:9px;padding:0 4px;border-radius:3px;text-transform:uppercase;
+     letter-spacing:.3px;margin-left:3px}
+.why.r{background:var(--danger-wash);color:var(--danger)}
+.why.a{background:var(--warn-wash);color:var(--warn)}
 
 /* ---------- cards ---------- */
 .row{display:grid;gap:16px;margin-bottom:16px}
@@ -844,15 +848,26 @@ async function loadTopology(){
 
 function renderHosts(list, onPick){
   $("#hostList").innerHTML = list.length ? list.map((h,i)=>{
-    // Rank on the strongest evidence anywhere in the host's history: a machine
-    // that was loud an hour ago still deserves the analyst's attention.
-    const r = Math.max(h.observed_peak_risk ?? 0, h.peak_forecast_risk ?? 0);
-    const cls = r>=0.5?"hi":r>=0.25?"md":"";
-    const surp = h.surprise!=null ? ` &middot; surprise ${h.surprise.toFixed(1)}` : "";
+    // Two independent channels, shown separately rather than blended: the
+    // supervised risk score, and how anomalous the host is relative to the rest
+    // of this capture. They fail in opposite regimes, so the pill shows
+    // whichever fired and the label says which.
+    const risk = Math.max(h.observed_peak_risk ?? 0, h.peak_forecast_risk ?? 0);
+    const z = h.surprise_z ?? 0;
+    const reason = h.flag_reason || "";
+    const cls = reason ? (risk>=0.5 ? "hi" : "md") : "";
+
+    const pill = risk >= 0.5
+      ? fmtPct(risk)
+      : (reason ? "⚠ " + z.toFixed(1) + "σ" : fmtPct(risk));
+
+    const why = reason
+      ? `<span class="why ${risk>=0.5?"r":"a"}">${reason}</span>` : "";
+
     return `<div class="host${i===0?" on":""}" data-host="${h.host}">
       <div><div class="ip">${h.host}</div>
-        <div class="meta">${h.predicted_stage} &middot; ${h.n_windows}w${surp}</div></div>
-      <span class="risk-pill ${cls}">${fmtPct(r)}</span></div>`;
+        <div class="meta">${h.predicted_stage} &middot; ${h.n_windows}w ${why}</div></div>
+      <span class="risk-pill ${cls}">${pill}</span></div>`;
   }).join("") : `<div class="msg" style="padding:20px;font-size:12px">No host has enough windows.</div>`;
 
   $("#hostList").querySelectorAll(".host").forEach(el=>{

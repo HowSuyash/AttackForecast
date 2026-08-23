@@ -301,11 +301,40 @@ The same IP address scores 1.000 in one capture and 0.000 in another, so this is
 model needs a long run of malicious windows to accumulate confidence; a
 twenty-minute burst produces nothing.
 
-So the honest headline is: **F1 0.984 for detecting sustained compromise.**
-Short-burst compromise is currently missed, and scenario 10's ten
-lightly-infected hosts are the worked example. Fixing it likely means training
-with explicit short-burst positives rather than letting long runs dominate the
-loss.
+So the supervised head's honest headline is: **F1 0.984 for detecting sustained
+compromise.** Short-burst compromise is invisible to it.
+
+### The two channels fail in opposite regimes
+
+Chasing that gap produced the most useful result in the project. The
+unsupervised surprise signal — prior prediction error, no labels involved —
+covers exactly what the supervised head misses:
+
+| Capture | Infected hosts | Supervised ROC-AUC | Surprise ROC-AUC |
+|---|---|---|---|
+| Scenario 1 — one host, 284 malicious windows | 1 | **1.000** | 0.270 |
+| Scenario 10 — ten hosts, ~20 windows each | 10 | 0.926 | **1.000** |
+| Scenario 12 | 2 | 0.482 | **0.881** |
+
+In scenario 10 the surprise ranking places all ten infected hosts at positions
+1–10. The reason follows from the earlier surprise finding: sustained bot
+traffic is *more* predictable than human traffic and therefore unsurprising,
+while a short burst of new behaviour is the opposite.
+
+So triage flags a host if **either** channel fires — supervised risk ≥ 0.5, or
+surprise more than 3 robust deviations above the median for that capture
+(median/MAD, because a handful of extreme hosts is precisely what we are hunting
+and would otherwise inflate the spread that hides them). Across all seven
+prepared captures:
+
+| | Count |
+|---|---|
+| Infected hosts caught | **14 / 16 (88%)** |
+| False alarms | 31 / 753 benign hosts (**4.1%**) |
+
+The dashboard labels each flag `risk` or `anomaly` rather than blending them
+into one number — the two carry different confidence, and an analyst should see
+which fired.
 
 | MITRE stage prediction | Accuracy | Macro-F1 | Macro-F1 (classes present) |
 |---|---|---|---|

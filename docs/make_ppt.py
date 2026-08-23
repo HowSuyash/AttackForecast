@@ -505,10 +505,13 @@ def build_feasibility(slide, images_dir: Path) -> None:
                  ("Generalising to unseen malware families", 2),
                  ("Only ~4 infected hosts to learn from → reported as a "
                   "measured limitation, not hidden; needs more captures", 1),
-                 ("Short-burst compromise is missed", 2),
+                 ("Supervised head misses short bursts", 2),
                  ("Same IP scores 1.000 with 284 malicious windows and 0.000 "
-                  "with 20 → not memorisation, a dependence on sustained "
-                  "activity; F1 above is for sustained compromise", 1),
+                  "with 20 → a dependence on sustained activity. The "
+                  "unsupervised surprise channel covers exactly that gap "
+                  "(ROC-AUC 1.000 on scenario 10's ten short-burst hosts), so "
+                  "triage flags on either → 14/16 hosts caught, 4.1% false "
+                  "alarms", 1),
                  ("Class imbalance (0.8% positive)", 2),
                  ("Transition-aware weighted sampling + noise augmentation "
                   "+ a deliberately small model", 1),
