@@ -1,0 +1,21 @@
+# Without this, `docker build` tars the whole directory as build context -
+# including data/raw, which is ~54 GB once CTU-13's per-scenario PCAPs are
+# extracted. The build would appear to hang before it ran a single instruction.
+data/raw/
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+.git/
+.claude/
+.vscode/
+.idea/
+
+# Documentation and slides are not needed to serve the app.
+docs/
+*.pptx
+*.pdf
+*.log
