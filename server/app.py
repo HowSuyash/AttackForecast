@@ -396,15 +396,28 @@ async def upload(file: UploadFile = File(...), horizon: int = Query(10)) -> dict
             )
 
         top = ranked[0]["host"]
-        detail = engine.analyse(
-            cells[cells["src"] == top].sort_values("window").tail(120), horizon=horizon
-        )
+        focus_cells = cells[cells["src"] == top].sort_values("window").tail(120)
+        detail = engine.analyse(focus_cells, horizon=horizon)
+
+        # Replay frames travel with the response rather than behind a second
+        # endpoint. /api/replay is addressed by (scenario, host) and reads from
+        # disk; an upload has neither, so without this the Play button stays
+        # dead on exactly the capture a visitor brought themselves. The frames
+        # are one batched pass, so this costs about two seconds.
+        replay_frames = None
+        try:
+            replay_frames = engine.replay(focus_cells, horizon=horizon)
+        except ValueError as exc:
+            # Too few consecutive windows to roll forward from - the analysis
+            # above is still valid, so report it rather than failing the upload.
+            log.info("replay unavailable for %s: %s", top, exc)
 
         return {
             "filename": file.filename,
             "ingest": info,
             "hosts": ranked[:20],
             "focus": detail,
+            "replay": replay_frames,
         }
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

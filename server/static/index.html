@@ -216,6 +216,9 @@ const $ = s => document.querySelector(s);
 const fmtPct = v => (100*v).toFixed(1) + "%";
 
 let META = null, CURRENT = null, SCENARIO = null, UPLOAD = null, TOPOLOGY = null;
+// Replay frames that arrived with an upload, waiting for renderForecast to
+// pick them up instead of fetching from /api/replay.
+let PENDING_REPLAY = null;
 
 /* ------------------------------------------------------------------ */
 /* Charting. Hand-rolled on canvas: a chart library would be another
@@ -652,6 +655,15 @@ function replayToggle(){
   RTIMER = setInterval(replayStep, RSPEED);
 }
 
+function replayAttach(data){
+  replayStop(); RACTIVE = false;
+  REPLAY = data; RPOS = 0;
+  const s = $("#rSlider");
+  s.max = REPLAY.frames.length-1; s.value = 0; s.disabled = false;
+  $("#playBtn").disabled = false;
+  $("#rClock").textContent = `${REPLAY.frames.length} frames ready · press Play`;
+}
+
 async function replayLoad(scenario, host){
   replayStop(); REPLAY = null; RACTIVE = false;
   try{
@@ -821,8 +833,14 @@ function renderForecast(d){
   };
   $("#rSlider").oninput = e=>{ replayStop(); RPOS = +e.target.value; replayRender(); };
 
-  if(d.scenario != null) replayLoad(d.scenario, d.host);
-  else $("#rClock").textContent = "replay is available for prepared captures";
+  // Prepared captures fetch their frames; an upload carries them in the
+  // response it already returned.
+  if(PENDING_REPLAY){ replayAttach(PENDING_REPLAY); PENDING_REPLAY = null; }
+  else if(d.scenario != null) replayLoad(d.scenario, d.host);
+  else {
+    $("#rClock").textContent = "replay unavailable for this capture";
+    $("#playBtn").disabled = true; $("#rSlider").disabled = true;
+  }
 }
 
 async function loadTopology(){
@@ -1001,12 +1019,16 @@ $("#file").onchange = async e=>{
   const fd = new FormData(); fd.append("file", f);
   try{
     const d = await api("/api/upload", {method:"POST", body:fd});
-    UPLOAD = {hostsDetail:{[d.focus.host]: d.focus}};
+    UPLOAD = {hostsDetail:{[d.focus.host]: d.focus}, replay: d.replay || null};
+    PENDING_REPLAY = d.replay || null;
     $("#uploadHint").innerHTML = `${d.ingest.n_flows.toLocaleString()} flows &middot;
       ${d.ingest.n_cells} windows &middot; ${d.ingest.n_hosts} hosts<br>
       packet features: ${d.ingest.packet_features?"yes":"flow-level only"}`;
     renderHosts(d.hosts, h=>{
-      if(UPLOAD.hostsDetail[h]) renderForecast(UPLOAD.hostsDetail[h]);
+      if(UPLOAD.hostsDetail[h]){
+        PENDING_REPLAY = UPLOAD.replay;
+        renderForecast(UPLOAD.hostsDetail[h]);
+      }
       else fail("Re-upload to analyse a different host in detail.");
     });
     renderForecast(d.focus);
