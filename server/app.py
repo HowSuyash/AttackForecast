@@ -15,6 +15,7 @@ The upload endpoint accepts either input the PS names:
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import tempfile
 from functools import lru_cache
@@ -91,14 +92,21 @@ def meta() -> dict:
     }
 
 
+# Anchored so it matches scenario_07.parquet but not scenario_07_edges.parquet.
+# A plain `scenario_*.parquet` glob matches both, and since both stems split to
+# the same number every capture appeared twice in the dropdown.
+_SCENARIO_FILE = re.compile(r"^scenario_(\d+)$")
+
+
 def available_scenarios() -> list[dict]:
+    from src.config import CTU13_FAMILIES
+
     out = []
     for path in sorted(PROCESSED_DIR.glob("scenario_*.parquet")):
-        try:
-            n = int(path.stem.split("_")[1])
-        except (IndexError, ValueError):
+        m = _SCENARIO_FILE.match(path.stem)
+        if not m:
             continue
-        from src.config import CTU13_FAMILIES
+        n = int(m.group(1))
         out.append({
             "id": n,
             "family": CTU13_FAMILIES.get(n, "unknown"),
