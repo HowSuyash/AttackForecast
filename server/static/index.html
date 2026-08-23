@@ -78,8 +78,20 @@ select,.btn{width:100%;background:var(--panel-2);color:var(--txt);
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
       padding:16px;box-shadow:var(--shadow)}
 .card h3{font-size:12px;text-transform:uppercase;letter-spacing:.7px;
-         color:var(--txt-dim);margin-bottom:12px}
+         color:var(--txt-dim);margin-bottom:12px;
+         display:flex;align-items:center;justify-content:space-between;gap:10px}
 .card .hint{font-size:11px;color:var(--txt-faint);margin-top:10px;line-height:1.45}
+/* The long explanations are the difference between a product and a lab
+   notebook. They earn their place when someone asks, not before, so they sit
+   behind the toggle and the panel titles carry the surface. */
+.card .hint[hidden]{display:none}
+.card .hint.open{background:var(--panel-2);border-radius:6px;padding:9px 11px;
+                 margin-top:11px}
+.q{width:18px;height:18px;flex:0 0 18px;border-radius:50%;padding:0;
+   background:var(--panel-2);border:1px solid var(--line);color:var(--txt-faint);
+   font-size:11px;line-height:1;transition:.15s}
+.q:hover{border-color:var(--accent);color:var(--accent)}
+.q.on{background:var(--accent);border-color:var(--accent);color:#fff}
 
 .stat{font-size:30px;font-weight:600;font-family:var(--mono);line-height:1.1}
 .stat.safe{color:var(--safe)} .stat.warn{color:var(--warn)} .stat.danger{color:var(--danger)}
@@ -564,6 +576,29 @@ function drawAttention(cv, attn, _t){
 
 function riskClass(v){ return v>=0.5?"danger":v>=0.25?"warn":"safe"; }
 
+// Tuck every card's long explanation behind a "?" in its title bar. Applied
+// after render rather than written into each template, so a new panel picks it
+// up for free and nothing has to stay in sync.
+function collapseHints(root){
+  (root || document).querySelectorAll(".card").forEach(card=>{
+    const h3 = card.querySelector(":scope > h3");
+    const hints = [...card.querySelectorAll(":scope > .hint")]
+                    .filter(h => !h.classList.contains("keep"));
+    if(!h3 || !hints.length || h3.querySelector(".q")) return;
+
+    hints.forEach(h => { h.hidden = true; });
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "q"; b.textContent = "?";
+    b.title = "What am I looking at?";
+    b.onclick = () => {
+      const show = hints[0].hidden;
+      hints.forEach(h => { h.hidden = !show; h.classList.toggle("open", show); });
+      b.classList.toggle("on", show);
+    };
+    h3.appendChild(b);
+  });
+}
+
 // Stages the model has never been able to learn, because CTU-13 barely
 // contains them: 13 Initial Access cells and 37 Lateral Movement cells across
 // all seven captures. Listing them in a legend as though the line might turn
@@ -579,14 +614,15 @@ function stageLegend(d){
   const shown = META.stages.filter(s => s.id > 0 && present.has(s.id));
   const rest  = META.stages.filter(s => s.id > 0 && !present.has(s.id));
 
+  // Names only in the key; the reason a stage is unsupported belongs in the
+  // explanation behind the "?", not wrapped across two lines of legend.
   return shown.map(s =>
       `<span><i style="background:${STAGE_COLORS[s.id]}"></i>${s.name}</span>`
     ).join("")
     + (rest.length
-        ? `<span style="opacity:.6">not in this host: ${
-            rest.map(s => UNLEARNED_STAGES[s.id]
-              ? `${s.name} (unsupported, ${UNLEARNED_STAGES[s.id]})`
-              : s.name).join(", ")}</span>`
+        ? `<span style="opacity:.55">not here: ${
+            rest.map(s => s.name + (UNLEARNED_STAGES[s.id] ? "*" : ""))
+                .join(", ")}</span>`
         : "");
 }
 
@@ -757,14 +793,20 @@ function renderForecast(d){
         <span><i style="background:rgba(211,32,64,.30)"></i>10th&ndash;90th percentile</span>
         <span><i style="background:var(--danger-wash)"></i>Ground-truth malicious</span>
       </div>
-      <div class="hint">Left of the divider the model sees traffic; right of it
-        it sees nothing &mdash; each step is rolled forward through the learned
-        prior. Solid line is observed, dashed is imagined.
-        <strong>On this host the probability stays pinned at 100%</strong> because
-        CTU-13's infected machines are malicious in every window they appear
-        &mdash; so watch the <em>colour</em>, not the height: it is the ATT&amp;CK
-        stage, and it changes as the attack progresses. Press
-        <strong>Play</strong> to advance minute by minute.</div>
+      <div class="hint keep">Left of the divider the model sees traffic; right of
+        it, nothing. <strong>Watch the colour, not the height</strong> &mdash;
+        it is the ATT&amp;CK stage.</div>
+      <div class="hint">Every point right of the divider is rolled forward
+        through the learned prior; solid line is observed, dashed is imagined.
+        The probability stays pinned at 100% on this host because CTU-13's
+        infected machines are malicious in every window they appear, which is
+        why the stage colour rather than the height carries the progression.
+        Press <strong>Play</strong> to advance minute by minute.<br><br>
+        <strong>*</strong> Initial Access and Lateral Movement are marked
+        unsupported: CTU-13 contains only 13 and 37 windows of them across all
+        seven captures, too few to learn, so the model never predicts either.
+        Its botnets are spam and click-fraud operations that barely move
+        laterally &mdash; the gap is the dataset's, not a tuning failure.</div>
     </div></div>
 
     <div class="row"><div class="card">
@@ -843,6 +885,7 @@ function renderForecast(d){
   drawKillStrip($("#stripChart"), d.timeline, null);
   drawSurprise($("#surpChart"), d.timeline);
   drawAttention($("#attnChart"), ex.temporal_attention);
+  collapseHints($("#forecastTab"));
 
   $("#playBtn").onclick = replayToggle;
   // Reset returns to the untouched static view, not to frame 0 of playback.
@@ -910,6 +953,7 @@ async function loadTopology(){
           legible neighbourhood.</div>
       </div></div>`;
     drawGraph($("#graphChart"), g, 560);
+    collapseHints(el);
     TOPOLOGY = g;
   }catch(e){ el.innerHTML = `<div class="msg">${e.message}</div>`; }
 }
@@ -1025,6 +1069,7 @@ async function loadBenchmark(){
         <div class="hint">Each row scores predictions made without observing
           that window &mdash; the model was cut off and rolled forward.</div>
       </div></div>`;
+    collapseHints(el);
   }catch(e){
     el.innerHTML = `<div class="msg">${e.message}<br><br>
       Run <code>python -m src.evaluate</code> to generate it.</div>`;
