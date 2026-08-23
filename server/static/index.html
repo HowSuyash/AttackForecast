@@ -225,12 +225,24 @@ let META = null, CURRENT = null, SCENARIO = null, UPLOAD = null, TOPOLOGY = null
 /* ------------------------------------------------------------------ */
 
 function setupCanvas(cv, h){
+  // Returns null when the canvas has no measurable width yet — freshly
+  // inserted markup, or a panel inside a tab that is still display:none.
+  // Drawing at width 0 silently produces a blank canvas that nothing ever
+  // repaints, which is how the upload path ended up rendering empty charts.
   const dpr = window.devicePixelRatio || 1;
-  const w = cv.clientWidth || cv.parentElement.clientWidth;
+  const w = cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth) || 0;
+  if(w < 10) return null;
   cv.width = w*dpr; cv.height = h*dpr; cv.style.height = h+"px";
   const g = cv.getContext("2d");
   g.setTransform(dpr,0,0,dpr,0,0);
   return {g,w,h};
+}
+
+// Re-run a draw on the next frame once layout has settled. Bounded, so a
+// permanently hidden canvas cannot spin forever.
+function retryDraw(fn, tries){
+  if((tries||0) > 30) return;
+  requestAnimationFrame(()=> fn((tries||0)+1));
 }
 function css(v){
   return v.startsWith("var(")
@@ -238,8 +250,10 @@ function css(v){
     : v;
 }
 
-function drawForecast(cv, timeline, forecast, threshold){
-  const {g,w,h} = setupCanvas(cv, 260);
+function drawForecast(cv, timeline, forecast, threshold, _t){
+  const _c = setupCanvas(cv, 260);
+  if(!_c){ retryDraw(t=>drawForecast(cv,timeline,forecast,threshold,t), _t); return; }
+  const {g,w,h} = _c;
   const pad = {l:44, r:16, t:14, b:28};
   const pw = w-pad.l-pad.r, ph = h-pad.t-pad.b;
   const nPast = timeline.length, nFut = forecast.length, total = nPast+nFut;
@@ -355,12 +369,14 @@ function drawForecast(cv, timeline, forecast, threshold){
   if(nFut) g.fillText("+"+nFut+"m", X(total-1), pad.t+ph+7);
 }
 
-function drawKillStrip(cv, timeline, upto){
+function drawKillStrip(cv, timeline, upto, _t){
   // One block per minute, coloured by the stage the model inferred. The whole
   // capture at a glance: a flat blue run turning red is a bot finishing
   // reconnaissance and starting to exfiltrate, and that reads instantly in a
   // way a stage label on a single window never does.
-  const {g,w,h} = setupCanvas(cv, 54);
+  const _c = setupCanvas(cv, 54);
+  if(!_c){ retryDraw(t=>drawKillStrip(cv,timeline,upto,t), _t); return; }
+  const {g,w,h} = _c;
   g.clearRect(0,0,w,h);
   const n = timeline.length;
   if(!n) return;
@@ -396,11 +412,13 @@ function drawKillStrip(cv, timeline, upto){
   g.fillText(n+" minutes", w, top+bh+9);
 }
 
-function drawGraph(cv, data, height){
+function drawGraph(cv, data, height, _t){
   // Force-directed layout, hand-rolled. Three forces: repulsion between every
   // pair, spring attraction along edges, and a weak pull to the centre so
   // disconnected nodes do not drift off-canvas.
-  const {g,w,h} = setupCanvas(cv, height);
+  const _c = setupCanvas(cv, height);
+  if(!_c){ retryDraw(t=>drawGraph(cv,data,height,t), _t); return; }
+  const {g,w,h} = _c;
   const nodes = data.nodes, edges = data.edges;
   if(!nodes.length){
     g.fillStyle=css("var(--txt-faint)"); g.font="13px "+css("var(--sans)");
@@ -475,8 +493,10 @@ function drawGraph(cv, data, height){
   });
 }
 
-function drawSurprise(cv, timeline){
-  const {g,w,h} = setupCanvas(cv, 110);
+function drawSurprise(cv, timeline, _t){
+  const _c = setupCanvas(cv, 110);
+  if(!_c){ retryDraw(t=>drawSurprise(cv,timeline,t), _t); return; }
+  const {g,w,h} = _c;
   const pad = {l:44, r:16, t:12, b:24};
   const pw = w-pad.l-pad.r, ph = h-pad.t-pad.b;
   g.clearRect(0,0,w,h);
@@ -512,8 +532,10 @@ function drawSurprise(cv, timeline){
   g.lineTo(X(vals.length-1), pad.t+ph); g.lineTo(X(0), pad.t+ph); g.closePath(); g.fill();
 }
 
-function drawAttention(cv, attn){
-  const {g,w,h} = setupCanvas(cv, 92);
+function drawAttention(cv, attn, _t){
+  const _c = setupCanvas(cv, 92);
+  if(!_c){ retryDraw(t=>drawAttention(cv,attn,t), _t); return; }
+  const {g,w,h} = _c;
   g.clearRect(0,0,w,h);
   if(!attn || !attn.length){
     g.fillStyle=css("var(--txt-faint)"); g.font="12px "+css("var(--sans)");
@@ -970,6 +992,10 @@ async function loadBenchmark(){
 $("#uploadBtn").onclick = ()=> $("#file").click();
 $("#file").onchange = async e=>{
   const f = e.target.files[0]; if(!f) return;
+  // Results land on the Forecast tab, so go there before rendering. Drawing
+  // into a display:none panel gives every canvas zero width.
+  location.hash = "forecast";
+  selectTab("forecast");
   $("#uploadHint").textContent = `Processing ${f.name}…`;
   busy(`Extracting features from ${f.name}…`);
   const fd = new FormData(); fd.append("file", f);
@@ -1003,6 +1029,22 @@ function selectTab(which){
     $("#benchmarkTab").style.display = which==="benchmark"?"":"none";
     if(which==="benchmark") loadBenchmark();
     if(which==="topology" && !TOPOLOGY) loadTopology();
+
+    // Canvases drawn while their tab was hidden had zero width and stayed
+    // blank; repaint on the way back in.
+    if(which==="forecast" && CURRENT && $("#fcChart")){
+      if(REPLAY && RACTIVE) replayRender();
+      else {
+        drawForecast($("#fcChart"), CURRENT.timeline, CURRENT.forecast,
+                     CURRENT.prediction.threshold);
+        drawKillStrip($("#stripChart"), CURRENT.timeline, null);
+      }
+      drawSurprise($("#surpChart"), CURRENT.timeline);
+      drawAttention($("#attnChart"), (CURRENT.explanation||{}).temporal_attention);
+    }
+    if(which==="topology" && TOPOLOGY && $("#graphChart")){
+      drawGraph($("#graphChart"), TOPOLOGY, 560);
+    }
 }
 
 document.querySelectorAll(".tab").forEach(t=>{
