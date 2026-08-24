@@ -47,6 +47,14 @@ button{font-family:inherit;font-size:inherit;cursor:pointer}
              display:flex;align-items:center;justify-content:center;
              color:#fff;font-size:13px;font-weight:700}
 .brand h1{font-size:14.5px;letter-spacing:.1px;line-height:1.2}
+.brand .mark img{width:100%;height:100%;object-fit:contain;border-radius:7px}
+.brand .mark.haslogo{background:none}
+/* The team name was nowhere on the dashboard, and on the deck it sat so faint
+   it read as a watermark. Here it is a badge: it has to survive a projector. */
+.brand .team{display:inline-block;margin-top:10px;padding:3px 11px;
+             border-radius:999px;background:var(--accent-wash);
+             border:1px solid var(--accent);color:var(--accent);
+             font-size:11.5px;font-weight:700;letter-spacing:.3px}
 .brand .sub{color:var(--txt-faint);font-size:10.5px;margin-top:8px;
             font-family:var(--mono);line-height:1.5}
 .live{display:inline-flex;align-items:center;gap:5px;margin-top:8px;
@@ -314,9 +322,10 @@ tr.best td{color:var(--safe);font-weight:600}
   <aside class="side">
     <div class="brand">
       <div class="top">
-        <div class="mark">◆</div>
+        <div class="mark" id="brandMark">◆</div>
         <h1>Network Attack<br>Forecasting</h1>
       </div>
+      <div class="team">Git with It</div>
       <div class="sub" id="brandSub">world model &middot; loading&hellip;</div>
       <div class="live"><i></i>offline &middot; on-device</div>
     </div>
@@ -1902,6 +1911,21 @@ window.addEventListener("resize", ()=>{
     if(sp) drawSurprise(sp, CURRENT.timeline);
   }
 });
+
+// Swap the placeholder diamond for a real logo the moment one exists at
+// static/logo.png, so dropping the file in is the whole install step.
+(function brandLogo(){
+  const img = new Image();
+  img.onload = () => {
+    const m = $("#brandMark");
+    if(!m) return;
+    m.textContent = "";
+    m.classList.add("haslogo");
+    m.appendChild(img);
+  };
+  img.alt = "";
+  img.src = "/static/logo.png";
+})();
 
 (async function init(){
   try{

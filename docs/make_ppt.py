@@ -950,16 +950,26 @@ def main() -> None:
     # the instructions slide may be removed before upload.
     delete_slide(prs, 6)
 
-    # The team-name ovals are template furniture; fill them so the deck does
-    # not go out with placeholder text on every slide.
+    # The team-name ovals are template furniture. Left as the template ships
+    # them - 9pt, unbolded, theme colour on a transparent oval - the name sat
+    # so faint on every slide that it read as a watermark. Made a badge:
+    # filled, outlined, and the name in the deck's own navy.
     for slide in prs.slides:
         for shape in slide.shapes:
             if shape.name.startswith("Oval") and shape.has_text_frame:
                 if "Your Team Name" in shape.text_frame.text:
+                    shape.shadow.inherit = False
+                    shape.fill.solid()
+                    shape.fill.fore_color.rgb = CARD_BG
+                    shape.line.color.rgb = NAVY
+                    shape.line.width = Pt(1.5)
                     for para in shape.text_frame.paragraphs:
                         for run in para.runs:
                             run.text = args.team_name
-                            run.font.size = Pt(9)
+                            run.font.size = Pt(11)
+                            run.font.bold = True
+                            run.font.color.rgb = NAVY
+                            run.font.name = BODY_FONT
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(args.out))
