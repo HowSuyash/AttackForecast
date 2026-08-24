@@ -549,7 +549,7 @@ def add_ring(slide, cx, cy, items, *, r=0.92):
         shp(slide, MSO_SHAPE.OVAL, mx - 0.15, my - 0.15, 0.30, 0.30,
             fill=colour, lines=[str(i + 1)], size=8, bold=True)
         lx = cx + (r + 1.34) * math.cos(ang) - 0.94
-        ly = cy + (r + 0.78) * math.sin(ang) - 0.30
+        ly = cy + (r + 0.68) * math.sin(ang) - 0.30
         label(slide, lx, ly, 1.88, 0.62,
               [(head, 8.5, True), (detail, 7, False)], color=colour, spacing=1)
 
@@ -582,14 +582,19 @@ def add_stack_layers(slide, x, y, w, layers, *, band_h=0.50, arrow_h=0.15):
 
 
 def add_notes(slide, x, y, w, items, *, h=0.72):
-    """Folded-corner notes - the reference deck's team/reference strip."""
+    """Folded-corner notes - the reference deck's team strip.
+
+    An item is a string, or (name, role) for a note with a line under it.
+    """
     n = len(items)
     gap = 0.10
     nw = (w - (n - 1) * gap) / n
-    for i, text in enumerate(items):
+    for i, item in enumerate(items):
         colour = PALETTE[i % len(PALETTE)]
+        lines = ([(item[0], 9, True), (item[1], 7, False)]
+                 if isinstance(item, tuple) else [item])
         shp(slide, MSO_SHAPE.FOLDED_CORNER, x + i * (nw + gap), y, nw, h,
-            fill=colour, lines=[text], size=8, bold=True)
+            fill=colour, lines=lines, size=8, bold=True)
 
 
 # --------------------------------------------------------------------------
@@ -719,7 +724,8 @@ def build_technical(slide) -> None:
     ])
 
     section(slide, rx, TOP, rw, "Tech stack used")
-    add_stack_table(slide, rx, TOP + 0.50, rw, [
+    # Ten rows at the default pitch ran the last one into the footer band.
+    add_stack_table(slide, rx, TOP + 0.50, rw, row_h=0.385, rows=[
         ("Language", "Python 3.13"),
         ("Deep learning", "PyTorch (CPU-only)"),
         ("Packet parsing", "Scapy - raw PCAP, flow rebuild"),
@@ -829,7 +835,7 @@ def build_impact(slide) -> None:
             ], rx=2.10, ry=1.52)
 
     section(slide, rx, TOP + 0.58, rw, "Benefits of AttackForecast")
-    add_ring(slide, rx + rw / 2, TOP + 3.00, [
+    add_ring(slide, rx + rw / 2, TOP + 2.92, [
         ("Early warning", "up to 10 minutes before the chain closes"),
         ("Low noise", "4.9% false alarms across 13 captures"),
         ("Auditable", "replay shows what the model knew, minute by minute"),
@@ -891,10 +897,14 @@ def build_references(slide) -> None:
               [(head, 10, True)] + [(b, 7.5, False) for b in body],
               color=WHITE, spacing=2)
 
-    section(slide, LEFT, TOP + 3.44, WIDTH, "Built with")
-    add_notes(slide, LEFT, TOP + 3.92, WIDTH, [
-        "Python 3.13", "PyTorch", "Scapy", "pandas + NumPy",
-        "scikit-learn", "FastAPI", "Integrated Gradients",
+    section(slide, LEFT, TOP + 3.24, WIDTH, "Team - Git with It")
+    add_notes(slide, LEFT, TOP + 3.70, WIDTH, [
+        ("Suyash Shukla", "Team Leader"),
+        ("Tanmay Kumar Sinha", "Member"),
+        ("Shivam Kumar Tripathi", "Member"),
+        ("Tanay", "Member"),
+        ("Yuvan Laxmanan", "Member"),
+        ("Vaishnavi Tripathi", "Member"),
     ], h=0.68)
 
     add_band(slide, LEFT, BOTTOM - 0.92, WIDTH, 0.44,
