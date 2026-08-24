@@ -98,7 +98,7 @@ hai — spam bhejta hai, fake ad clicks karta hai.
 
 Ye data free aur legal hai (CC BY licence), aur PS mein naam se mention hai.
 
-Humne **7 captures** use kiye → **95,518 network states** bane.
+Humne **saare 13 captures** use kiye → **2,58,229 network states** bane, jinme **30 infected hosts** hain.
 
 Download karne ka command [section 10](#10-khud-chala-ke-dekho) mein hai.
 
@@ -300,17 +300,33 @@ Humne ek purana simple tareeka (**logistic regression**) banaya aur usse
 
 | Model | F1 | Galat alarm rate (FPR) |
 |---|---|---|
-| **Humara world model** | **0.984** | **0.000** |
-| Purana tareeka (8 min history) | 0.744 | 0.004 |
-| Purana tareeka (1 min) | 0.550 | 0.009 |
+| **Humara world model** | **0.979** | 0.002 |
+| Purana tareeka (8 min history) | 0.977 | 0.002 |
+| Purana tareeka (1 min) | 0.963 | 0.002 |
 
 **F1 kya hai?** 0 se 1 ke beech score, jo do cheezein milata hai:
 
 - **Precision** — jab alarm bajaya, kitni baar sach mein attack tha
 - **Recall** — jitne asli attacks the, unme se kitne pakde
 
-0.984 matlab dono lagbhag perfect. Aur **FPR 0.000** = ek bhi galat alarm nahi.
-SOC team ke liye ye critical hai — jhoothe alarms se log tool hi band kar dete hain.
+**Ab dhyan se padho — ye important hai.** Detection pe humara model purane
+tareeke se **behtar nahi hai** (0.979 vs 0.977). Ye galti nahi, honest result
+hai: jab saara data mila, purana tareeka bhi theek se seekh gaya.
+
+Toh humara model kahan behtar hai? **Forecasting mein.** Wahan wo "maan lo kuch
+nahi badlega" wale baseline ko 10 mein se 9 horizons pe harata hai:
+
+| Kitne minute aage | 2 | 3 | 4 | 6 | 10 |
+|---|---|---|---|---|---|
+| **Humara model** | **0.583** | **0.647** | **0.642** | **0.624** | **0.524** |
+| "kuch nahi badlega" | 0.473 | 0.478 | 0.474 | 0.455 | 0.436 |
+
+Yahi asli claim hai: *"hum behtar detect nahi karte — hum bata sakte hain ki
+host kahan ja raha hai."*
+
+**Aur ek naya result:** naye malware pe bhi kaam karta hai. Neris/Rbot pe train
+kiya, **Virut aur Murlo pe test** — jo model ne kabhi dekhe hi nahi. Wahan
+F1 **0.874**. Ye pehle poori tarah fail hota tha.
 
 📁 Code: [`src/evaluate.py`](../src/evaluate.py) · Result:
 [`artifacts/reports/benchmark.md`](../artifacts/reports/benchmark.md)
@@ -343,8 +359,8 @@ kar raha tha.
 
 ### Finding 2 — Dataset mein "attack se pehle" ka data hai hi nahi
 
-Humne check kiya: **856 malicious windows, aur infected computers ka ek bhi
-clean window nahi.**
+Humne check kiya: **4,391 malicious windows, aur infected computers ka ek bhi
+clean window nahi** — 2,58,229 windows mein ek bhi nahi.
 
 Kyun? Researchers ne malware chala ke recording start ki. To "pehle normal tha,
 phir infected hua" wala transition **capture hi nahi hua**.
@@ -687,7 +703,8 @@ docs/
 1. *"Purane tools ek connection dekh ke label dete hain. Humara model seekhta
    hai ki network kaise badalta hai — phir aage chala ke dekhta hai."*
 2. *"Traffic dekhna band karke bhi model aage chal sakta hai. Wahi forecast hai."*
-3. *"Purane tareeke ko wahi data diya. F1 0.984 vs 0.744."*
+3. *"Detection mein hum baseline ke barabar hain. Farak forecasting mein hai —
+   wahan hum 'kuch nahi badlega' wale baseline ko 9/10 baar harate hain."*
 4. *"Humne apne pipeline mein ek leak pakda aur hata diya."*
 
 **Jab atak jao:**

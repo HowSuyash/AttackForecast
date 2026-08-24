@@ -98,8 +98,10 @@ Two different questions, reported separately:
   forecast its future, with a guard band so no sequence straddles a boundary.
   This is the deployment shape: a system installed on a network learns that
   network.
-- **Family holdout** — train on Neris/Rbot/Sogou, test on Virut/Murlo. Asks
-  whether the model transfers to unseen malware.
+- **Family holdout** — train on Neris/Rbot/Menti/Sogou, test on Virut and
+  Murlo. Asks whether the model transfers to unseen malware. On seven scenarios
+  this failed outright; with all thirteen it reaches F1 0.874 and ROC-AUC 0.982.
+  Stage forecasting still does not transfer across families.
 
 Baselines get identical features, scaler and labels. The stacked logistic
 regression additionally sees the same 8-window history the world model does, so
@@ -108,35 +110,13 @@ forecasting is compared against **persistence** ("assume nothing changes") in
 two variants: one given the ground-truth current stage (an oracle, not
 deployable) and one repeating the model's own inferred stage (like-for-like).
 
-## 6. Two findings that shaped the build
+## 6. Findings that shaped the build
 
-**CTU-13 has no pre-infection baseline.** Across all seven prepared scenarios,
-infected hosts are malicious in *every* window they appear — 856 malicious
-cells, zero benign windows belonging to a compromised machine. The captures
-were made by running live malware, so "will this host be attacked" is close to
-degenerate: 101 of 11,388 training sequences contain any positive, and 98 of
-those are positive at every step. What *is* forecastable is kill-chain
-progression — 138 real stage transitions between consecutive windows. Stage
-forecasting is therefore the headline task, with binary infiltration reported
-as detection transfer.
+**CTU-13 has no pre-infection baseline.** Across all thirteen scenarios, infected hosts are malicious in *every* window they appear — 4,391 malicious cells and not one benign window belonging to a compromised machine, in 258,229 windows. So "will this host be attacked" is close to degenerate here, and kill-chain progression is the forecastable signal instead.
 
-**A PCAP can leak the label.** CTU-13's conveniently sized capture for
-scenario 1 contains only the infected host's traffic, and only part of the
-timeline. Joined onto the state cells, `has_packet_features` became a perfect
-label proxy — the model scored 0.9995 on training windows and 0.003 on every
-later window of the same host, having learned the metadata rather than the
-behaviour. Packet features are now opt-in and only enabled when packet coverage
-is label-independent (a full-traffic capture); the extractor still always runs
-for uploaded PCAPs. Removing the shortcut forced the model onto real behavioural
-features and detection F1 rose from 0.23 to 0.98 — the leak was making the model
-*worse*, not better.
+**A PCAP can leak the label.** CTU-13's conveniently sized scenario-1 capture holds only the infected host's traffic, so joined onto the state cells `has_packet_features` became a perfect label proxy: 0.9995 on training windows, 0.003 on every later window of the same host. The model had learned the metadata, not the behaviour. Packet features are now opt-in and enabled only when coverage is label-independent; removing the shortcut took detection F1 from 0.23 to 0.98 — the leak was making the model *worse*.
 
-**A third, smaller one worth mentioning:** the world model's prior-error
-"surprise" signal is *anti*-correlated with compromise here (ROC-AUC 0.375;
-mean 0.35 on malicious windows against 0.49 on benign). Botnet traffic is more
-predictable than human traffic. Read in the right direction that is useful —
-low surprise on a flagged host corroborates automation — so it ships as a
-labelled novelty channel rather than being folded into the risk score.
+**The two channels fail in opposite regimes.** The prior-error "surprise" signal is *anti*-correlated with compromise (ROC-AUC 0.210) — sustained bot traffic is more predictable than human traffic. But the supervised head needs that sustained run to build confidence, so short bursts are invisible to it and surprising to the prior. Triage flags on either channel: 28 of 30 infected hosts caught at 4.9% false alarms, ten of them by the anomaly channel alone.
 
 ## 7. Decision support surface
 

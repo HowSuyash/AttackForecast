@@ -181,17 +181,17 @@ host 147.32.84.165, scenario 1, one digit per minute:
 ## An honest finding about CTU-13
 
 **Every infected host in CTU-13 is malicious in every window it appears.**
-Measured across all seven prepared scenarios: 856 malicious cells, **zero**
-benign windows belonging to an infected host.
+Measured across all thirteen scenarios: 4,391 malicious cells, **zero**
+benign windows belonging to an infected host. Not one, in 258,229 windows.
 
 That is not a bug in the pipeline — it is how the dataset was made. The capture
 authors ran live malware and recorded the result, so there is no pre-infection
 baseline for the compromised machines.
 
 The consequence is important and we state it rather than hide it: **on CTU-13,
-a binary "will this host be attacked" target is close to degenerate.** Only 101
-of 11,388 training sequences contain any positive window, and 98 of those are
-positive in *every* step. A model scored purely on that target is mostly
+a binary "will this host be attacked" target is close to degenerate.** Only
+1,406 of 38,066 training sequences contain any positive window, and almost all
+of those are positive in *every* step. A model scored purely on that target is mostly
 learning which host is infected, not anticipating anything.
 
 What *is* genuinely forecastable on this data is **kill-chain progression**.
@@ -238,15 +238,16 @@ Three properties make the benchmark worth reading:
 
    | Split | Scenarios | Families |
    |---|---|---|
-   | Train | 1, 4, 7, 10 | Neris, Rbot, Sogou |
+   | Train | 1, 2, 3, 4, 6, 7, 9, 10, 11 | Neris, Rbot, Menti, Sogou |
    | Validation | 12 | NSIS.ay |
-   | Test | 5, 8 | Virut, Murlo |
+   | Test | 5, 8, 13 | Virut, Murlo |
 
-   Family holdout is the harder question and the model does poorly on it, which
-   is unsurprising at this data scale: CTU-13 gives roughly one infected host
-   per scenario, so training sees about four distinct compromised machines.
-   Four examples is not enough to learn a malware-independent notion of
-   compromise, and we report that rather than quietly dropping the split.
+   Family holdout is the harder question. On seven scenarios it failed
+   outright - training saw about four distinct compromised machines, which is
+   not enough to learn a malware-independent notion of compromise. With all
+   thirteen it works: F1 0.874 and ROC-AUC 0.982 on Virut and Murlo, families
+   the model never saw. Stage forecasting still does not transfer across
+   families, which is reported alongside it rather than omitted.
 
 2. **Thresholds are chosen on validation and frozen** before the test split is
    touched.
@@ -266,83 +267,102 @@ benchmark reproduces the report byte for byte — verified by running it twice.
 
 ### Results — temporal split
 
-Trained on the first 70% of scenarios 1, 4, 5, 7, 8, 10, 12; tested on the
-final 15% of each.
+All 13 CTU-13 scenarios: 258,229 state cells, 30 infected hosts across 1,530
+host-slots. Trained on the first 70% of every capture, tested on the final 15%.
 
 | Model | Precision | Recall | F1 | FPR | ROC-AUC | AP |
 |---|---|---|---|---|---|---|
-| **World model (RSSM)** | **0.968** | **1.000** | **0.984** | **0.000** | 1.000 | 1.000 |
-| Logistic regression (8-window stack) | 0.628 | 0.912 | 0.744 | 0.004 | 0.997 | 0.858 |
-| Logistic regression (single window) | 0.409 | 0.842 | 0.550 | 0.009 | 0.994 | 0.730 |
+| **World model (RSSM)** | 0.959 | **1.000** | **0.979** | 0.002 | **1.000** | 0.995 |
+| Logistic regression (8-window stack) | 0.956 | 0.999 | 0.977 | 0.002 | 1.000 | 0.998 |
+| Logistic regression (single window) | 0.948 | 0.979 | 0.963 | 0.002 | 0.999 | 0.986 |
 
-**Read the binary numbers carefully — twice over.**
-
-*First*, because an infected host is malicious in every window it appears,
-`infiltration_next` is near-constant per host. A strong score means the model
-identified *which host is compromised* — a real detection result with a large
-margin over both baselines — but a perfect score at +10 windows is **not**
-evidence of forecasting skill, because the target barely changes across the
-horizon. For context, the best single feature (`frac_syn_only`) reaches AP 0.21
-on validation, so the model is not riding one giveaway column.
-
-*Second, and more limiting:* every positive window in this test split belongs to
-**three host-slots, all of them `147.32.84.165`** (in scenarios 1, 4 and 8).
-That is not a sampling choice — it is what falls in the held-out final 15% of
-each capture. Measured directly:
-
-| Host | Malicious windows | Model risk |
-|---|---|---|
-| scenario 1, `147.32.84.165` | 284 | **1.000** |
-| scenario 10, `147.32.84.165` | 20 | **0.000** |
-| scenario 10, `147.32.84.191` … `.209` (9 more) | ~20 each | **0.000** |
-
-The same IP address scores 1.000 in one capture and 0.000 in another, so this is
-**not address memorisation** — it is a dependence on *sustained* activity. The
-model needs a long run of malicious windows to accumulate confidence; a
-twenty-minute burst produces nothing.
-
-So the supervised head's honest headline is: **F1 0.984 for detecting sustained
-compromise.** Short-burst compromise is invisible to it.
-
-### The two channels fail in opposite regimes
-
-Chasing that gap produced the most useful result in the project. The
-unsupervised surprise signal — prior prediction error, no labels involved —
-covers exactly what the supervised head misses:
-
-| Capture | Infected hosts | Supervised ROC-AUC | Surprise ROC-AUC |
-|---|---|---|---|
-| Scenario 1 — one host, 284 malicious windows | 1 | **1.000** | 0.270 |
-| Scenario 10 — ten hosts, ~20 windows each | 10 | 0.926 | **1.000** |
-| Scenario 12 | 2 | 0.482 | **0.881** |
-
-In scenario 10 the surprise ranking places all ten infected hosts at positions
-1–10. The reason follows from the earlier surprise finding: sustained bot
-traffic is *more* predictable than human traffic and therefore unsurprising,
-while a short burst of new behaviour is the opposite.
-
-So triage flags a host if **either** channel fires — supervised risk ≥ 0.5, or
-surprise more than 3 robust deviations above the median for that capture
-(median/MAD, because a handful of extreme hosts is precisely what we are hunting
-and would otherwise inflate the spread that hides them). Across all seven
-prepared captures:
-
-| | Count |
-|---|---|
-| Infected hosts caught | **14 / 16 (88%)** |
-| False alarms | 31 / 753 benign hosts (**4.1%**) |
-
-The dashboard labels each flag `risk` or `anomaly` rather than blending them
-into one number — the two carry different confidence, and an analyst should see
-which fired.
+**On detection the world model no longer beats logistic regression, and that is
+worth saying first.** An earlier run on seven scenarios showed 0.984 against
+0.744 — a gap that turned out to be an artefact of a degenerate test split
+where every positive window belonged to a single host. With all thirteen
+scenarios the split carries positives from **13 distinct hosts across 17
+host-slots**, the baselines have enough data to fit properly, and the margin
+disappears. Recognising *which host is compromised* is not where the extra
+machinery earns its place.
 
 | MITRE stage prediction | Accuracy | Macro-F1 | Macro-F1 (classes present) |
 |---|---|---|---|
-| **World model (RSSM)** | 0.998 | **0.455** | **0.683** |
-| Logistic regression (8-window stack) | 0.975 | 0.353 | 0.530 |
+| **World model (RSSM)** | 0.998 | **0.537** | **0.806** |
+| Logistic regression (8-window stack) | 0.981 | 0.453 | 0.680 |
+
+**Where it does earn its place is forecasting.** Rolled forward without
+observations, the stage forecast beats a like-for-like persistence baseline at
+9 of 10 horizons, and by a wide margin rather than a rounding error:
+
+| Windows ahead | 1 | 2 | 3 | 4 | 6 | 8 | 10 |
+|---|---|---|---|---|---|---|---|
+| **World model** | 0.478 | **0.583** | **0.647** | **0.642** | **0.624** | **0.552** | **0.524** |
+| Persistence (inferred) | 0.478 | 0.473 | 0.478 | 0.474 | 0.455 | 0.456 | 0.436 |
+
+That is the claim the architecture supports: not "we detect better", but
+**"we can say where a host is heading, and assuming nothing changes does
+worse."**
+
+### Results — held-out malware families
+
+Trained on Neris, Rbot, Menti and Sogou (scenarios 1, 2, 3, 4, 6, 7, 9, 10, 11);
+tested on **Virut and Murlo** (5, 8, 13), which the model never saw.
+
+| Model | Precision | Recall | F1 | FPR | ROC-AUC | AP |
+|---|---|---|---|---|---|---|
+| **World model (RSSM)** | **0.903** | 0.847 | 0.874 | **0.002** | **0.982** | 0.917 |
+| Logistic regression (single window) | 0.865 | **0.941** | **0.901** | 0.003 | 0.963 | 0.928 |
+| Logistic regression (8-window stack) | 0.513 | 0.959 | 0.669 | 0.019 | 0.973 | 0.913 |
+
+**This split used to fail outright** and is reported here as a genuine result:
+detection transfers to unseen malware families at F1 0.874 and ROC-AUC 0.982.
+Two honest caveats. Single-window logistic regression edges it on F1 (0.901),
+winning on recall while the world model wins on precision and false-positive
+rate. And stage forecasting does *not* transfer — on unseen families the rolled
+forward forecast loses to persistence at all ten horizons. Forecasting the
+progression of a malware family you have never observed remains unsolved here.
+
+### The two channels fail in opposite regimes
+
+The supervised head needs a *sustained* run of malicious windows to build
+confidence. Measured directly, and the direction of the effect is the point:
+
+| Host | Malicious windows | Supervised risk |
+|---|---|---|
+| scenario 1, `147.32.84.165` | 284 | **1.000** |
+| scenario 9, `147.32.84.191` … `.209` | ~110 each | **1.000** |
+| scenario 10, `147.32.84.165` | 20 | **0.000** |
+| scenario 10, `147.32.84.191` … `.209` | ~20 each | **0.000** |
+
+The same IP scores 1.000 in one capture and 0.000 in another, so this is **not
+address memorisation** — it is a dependence on how long the host stays loud.
+Around a hundred windows is enough; twenty is not.
+
+The unsupervised surprise signal — prior prediction error, no labels involved —
+covers exactly that gap, because sustained bot traffic is *more* predictable
+than human traffic and therefore unsurprising, while a short burst of new
+behaviour is the opposite.
+
+So triage flags a host if **either** channel fires: supervised risk ≥ 0.5, or
+surprise more than 3 robust deviations above the median for that capture
+(median/MAD, because a handful of extreme hosts is precisely what we are hunting
+and would otherwise inflate the spread that hides them). Across all thirteen
+captures:
+
+| | Count |
+|---|---|
+| Infected hosts caught | **28 / 30 (93%)** |
+| — flagged by the risk channel | 18 |
+| — flagged only by the anomaly channel | 10 |
+| False alarms | 74 / 1,500 benign hosts (**4.9%**) |
+
+Ten of the twenty-eight are caught **only** because the second channel exists.
+The dashboard labels each flag `risk` or `anomaly` rather than blending them
+into one number — they carry different confidence, and an analyst should see
+which fired.
 
 **Only three of the five stages are actually learnable here.** Counting model
-predictions against derived labels across all seven captures:
+predictions against derived labels:
 
 | Stage | Model predicts | In the data |
 |---|---|---|
@@ -402,11 +422,11 @@ detect attacks — it anti-detects them:
 
 | Signal | ROC-AUC | AP |
 |---|---|---|
-| Supervised head | 1.000 | 1.000 |
-| Model surprise | 0.375 | 0.006 |
-| Random | 0.500 | 0.008 |
+| Supervised head | 1.000 | 0.995 |
+| Model surprise | 0.210 | 0.034 |
+| Random | 0.500 | 0.038 |
 
-Mean surprise is 0.494 on benign windows against 0.349 on malicious ones.
+Mean surprise is 0.44 on benign windows against 0.27 on malicious ones.
 Botnet traffic is *more* predictable than human traffic, because beaconing and
 spam are machine-generated and regular while a university network's real users
 are erratic. That is still a usable signal read in the right direction — low

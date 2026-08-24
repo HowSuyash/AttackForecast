@@ -382,9 +382,9 @@ def build_idea(slide) -> None:
              ], accent=GREEN)
 
     add_band(slide, LEFT, y + h + 0.20, WIDTH, 0.56,
-             "Working prototype today  •  95,518 network states from 2.8M real "
-             "flows  •  F1 0.984 vs 0.744 for the strongest baseline  •  149 "
-             "hosts triaged in 0.5 s  •  minute-by-minute replay of the forecast",
+             "Working prototype today  •  258,229 network states from all 13 CTU-13 "
+             "captures  •  28 of 30 infected hosts flagged at 4.9% false alarms "
+             "•  transfers to unseen malware families  •  runs offline on CPU",
              fill=GREEN, size=12)
 
 
@@ -465,14 +465,14 @@ def build_feasibility(slide, images_dir: Path) -> None:
     right_w = RIGHT - right_x
 
     add_band(slide, LEFT, TOP, left_w, 0.44,
-             "Feasibility — already built and measured", fill=NAVY, size=12.5)
+             "Feasibility — where the model actually wins", fill=NAVY, size=12.5)
 
     add_table(slide, LEFT, TOP + 0.54, left_w, 1.60,
               [
-                  ["Sustained compromise, temporal split", "F1", "FPR", "Recall"],
-                  ["World model (ours)", "0.984", "0.000", "1.000"],
-                  ["Logistic regression, 8-window", "0.744", "0.004", "0.912"],
-                  ["Logistic regression, 1 window", "0.550", "0.009", "0.842"],
+                  ["Stage forecast, macro-F1 by horizon", "+2", "+4", "+10"],
+                  ["World model (ours)", "0.583", "0.642", "0.524"],
+                  ["“assume nothing changes” baseline", "0.473", "0.474", "0.436"],
+                  ["Detection F1: 0.979 vs 0.977 — a tie", "", "", ""],
               ],
               col_widths=[2.85, 1.10, 1.10, 1.10], highlight_row=1, size=10)
 
@@ -484,8 +484,9 @@ def build_feasibility(slide, images_dir: Path) -> None:
                  "Sub-second triage of a full capture after first load",
                  "Fully offline — suitable for air-gapped Critical "
                  "Information Infrastructure",
-                 "MITRE stage macro-F1 0.455 vs 0.353; beats a persistence "
-                 "baseline at 9 of 10 forecast horizons",
+                 "MITRE stage macro-F1 0.537 vs 0.453 for the baseline",
+                 "Transfers to unseen malware families — trained on Neris and "
+                 "Rbot, F1 0.874 and ROC-AUC 0.982 on Virut and Murlo",
                  "Replay reconstructs what the model knew at every minute, so "
                  "an analyst can audit a decision after the fact",
              ], accent=BLUE, size=10)
@@ -496,25 +497,21 @@ def build_feasibility(slide, images_dir: Path) -> None:
              "Potential Challenges and Risks  →  Our Mitigation",
              [
                  ("Label leak through metadata", 2),
-                 ("The available PCAP held only botnet traffic, so a "
-                  "“packet data present” flag became a perfect label "
-                  "proxy → detected it, removed it; F1 rose 0.23 → 0.98", 1),
-                 ("Dataset has no pre-infection baseline", 2),
-                 ("CTU-13 hosts are malicious in every window → we forecast "
-                  "kill-chain progression instead, and say so plainly", 1),
-                 ("Generalising to unseen malware families", 2),
-                 ("Only ~4 infected hosts to learn from → reported as a "
-                  "measured limitation, not hidden; needs more captures", 1),
-                 ("Supervised head misses short bursts", 2),
-                 ("Same IP scores 1.000 with 284 malicious windows and 0.000 "
-                  "with 20 → a dependence on sustained activity. The "
-                  "unsupervised surprise channel covers exactly that gap "
-                  "(ROC-AUC 1.000 on scenario 10's ten short-burst hosts), so "
-                  "triage flags on either → 14/16 hosts caught, 4.1% false "
-                  "alarms", 1),
-                 ("Class imbalance (0.8% positive)", 2),
-                 ("Transition-aware weighted sampling + noise augmentation "
-                  "+ a deliberately small model", 1),
+                 ("The available PCAP held only botnet traffic, so a “packet "
+                  "data present” flag became a perfect label proxy → detected "
+                  "it, removed it; F1 rose 0.23 → 0.98", 1),
+                 ("Detection is no better than logistic regression", 2),
+                 ("0.979 vs 0.977. An earlier 0.984-vs-0.744 gap was an "
+                  "artefact of a test split whose positives came from one "
+                  "host → the model earns its place on forecasting, not "
+                  "detection", 1),
+                 ("Short-burst compromise", 2),
+                 ("The risk head needs sustained activity → the unsupervised "
+                  "surprise channel covers that gap; triage flags on either, "
+                  "catching 28 of 30 hosts at 4.9% false alarms", 1),
+                 ("Stage forecasting does not cross families", 2),
+                 ("Detection transfers to unseen malware, progression does "
+                  "not — reported, not hidden", 1),
              ], accent=RED, size=9.5)
 
     # A screenshot from the running prototype. The deck is read without the
