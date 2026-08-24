@@ -316,6 +316,7 @@ const $ = s => document.querySelector(s);
 const fmtPct = v => (100*v).toFixed(1) + "%";
 
 let META = null, CURRENT = null, SCENARIO = null, UPLOAD = null, TOPOLOGY = null;
+let BENCH_HZ = null;
 // Replay frames that arrived with an upload, waiting for renderForecast to
 // pick them up instead of fetching from /api/replay.
 let PENDING_REPLAY = null;
@@ -1410,44 +1411,121 @@ async function loadHost(host){
 // Stage forecast against the persistence baseline, by horizon. This is the
 // comparison the project actually turns on, so it gets a chart rather than a
 // row in a table nobody reads from the back of a room.
+// Stage forecast against the persistence baseline, by horizon. This is the
+// comparison the project actually turns on, so it gets a chart rather than a
+// row in a table nobody reads from the back of a room.
+//
+// Hovering reads out the pair at that horizon. The gap between the two lines is
+// the whole claim, and asking a viewer to eyeball a 0.17 difference off a grid
+// is asking them to take it on trust.
 function drawHorizonChart(cv, rows, _t){
-  const _c = setupCanvas(cv, 210);
+  const _c = setupCanvas(cv, 230);
   if(!_c){ retryDraw(t=>drawHorizonChart(cv,rows,t), _t); return; }
   const {g,w,h} = _c;
-  const pad = {l:44, r:14, t:14, b:30};
+  const pad = {l:44, r:14, t:14, b:34};
   const pw = w-pad.l-pad.r, ph = h-pad.t-pad.b;
   const n = rows.length;
+  if(!n) return;
+  BENCH_HZ = rows;
   const X = i => pad.l + (n<=1 ? pw/2 : (i/(n-1))*pw);
   const Y = v => pad.t + (1 - Math.min(v,1)) * ph;
 
-  g.clearRect(0,0,w,h);
-  g.strokeStyle = css("var(--line)"); g.fillStyle = css("var(--txt-faint)");
-  g.font = "10px "+css("var(--mono)"); g.lineWidth = 1;
-  for(let v=0; v<=0.8001; v+=0.2){
-    const y = Y(v);
-    g.beginPath(); g.moveTo(pad.l,y); g.lineTo(w-pad.r,y); g.stroke();
-    g.textAlign="right"; g.textBaseline="middle";
-    g.fillText(v.toFixed(1), pad.l-7, y);
+  const SERIES = [
+    {key:"persistence_inferred_macro_f1", color:"var(--txt-faint)", dash:[5,4],
+     label:"Persistence"},
+    {key:"stage_macro_f1", color:"var(--accent)", dash:[], label:"World model"},
+  ];
+
+  let hover = null;
+
+  function render(){
+    g.clearRect(0,0,w,h);
+
+    g.strokeStyle = css("var(--line)"); g.fillStyle = css("var(--txt-faint)");
+    g.font = "10px "+css("var(--mono)"); g.lineWidth = 1;
+    for(let v=0; v<=0.8001; v+=0.2){
+      const y = Y(v);
+      g.beginPath(); g.moveTo(pad.l,y); g.lineTo(w-pad.r,y); g.stroke();
+      g.textAlign="right"; g.textBaseline="middle";
+      g.fillText(v.toFixed(1), pad.l-7, y);
+    }
+
+    if(hover != null){
+      g.strokeStyle = css("var(--txt-faint)"); g.setLineDash([3,3]);
+      g.globalAlpha = 0.6;
+      g.beginPath(); g.moveTo(X(hover), pad.t); g.lineTo(X(hover), pad.t+ph);
+      g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+    }
+
+    SERIES.forEach(s=>{
+      g.beginPath();
+      rows.forEach((r,i)=> i ? g.lineTo(X(i), Y(r[s.key])) : g.moveTo(X(i), Y(r[s.key])));
+      g.strokeStyle = css(s.color); g.lineWidth = 2.5; g.setLineDash(s.dash);
+      g.stroke(); g.setLineDash([]);
+      rows.forEach((r,i)=>{
+        const on = hover === i;
+        g.beginPath(); g.arc(X(i), Y(r[s.key]), on ? 5.5 : 3, 0, 6.283);
+        g.fillStyle = css(s.color); g.fill();
+        if(on){ g.strokeStyle = css("var(--panel)"); g.lineWidth = 2; g.stroke(); }
+      });
+    });
+
+    g.fillStyle = css("var(--txt-faint)"); g.font = "10px "+css("var(--mono)");
+    g.textAlign="center"; g.textBaseline="top";
+    rows.forEach((r,i)=> g.fillText("+"+r.step, X(i), pad.t+ph+8));
+
+    if(hover != null) drawTip(rows[hover], X(hover));
   }
 
-  const series = [
-    {key:"persistence_inferred_macro_f1", color:"var(--txt-faint)", dash:[5,4]},
-    {key:"stage_macro_f1",                color:"var(--accent)",    dash:[]},
-  ];
-  series.forEach(s=>{
-    g.beginPath();
-    rows.forEach((r,i)=> i ? g.lineTo(X(i), Y(r[s.key])) : g.moveTo(X(i), Y(r[s.key])));
-    g.strokeStyle = css(s.color); g.lineWidth = 2.5; g.setLineDash(s.dash);
-    g.stroke(); g.setLineDash([]);
-    rows.forEach((r,i)=>{
-      g.beginPath(); g.arc(X(i), Y(r[s.key]), 3, 0, 6.283);
-      g.fillStyle = css(s.color); g.fill();
-    });
-  });
+  function drawTip(r, cx){
+    const ours = r.stage_macro_f1, base = r.persistence_inferred_macro_f1;
+    const gap = ours - base;
+    const tie = Math.abs(gap) < 0.0005;
+    const lines = [
+      {t: `+${r.step} window${r.step === 1 ? "" : "s"}  ·  ${r.seconds_ahead.toFixed(0)}s ahead`,
+       c:"var(--txt-dim)", b:false},
+      {t: `World model      ${ours.toFixed(3)}`, c:"var(--accent)", b:true},
+      {t: `Persistence      ${base.toFixed(3)}`, c:"var(--txt-faint)", b:false},
+      {t: tie ? "level — no gain at this horizon"
+              : `${gap > 0 ? "+" : ""}${gap.toFixed(3)} ${gap > 0 ? "better" : "worse"}`,
+       c: tie ? "var(--txt-faint)" : gap > 0 ? "var(--safe)" : "var(--danger)", b:true},
+    ];
 
-  g.fillStyle = css("var(--txt-faint)"); g.font = "10px "+css("var(--mono)");
-  g.textAlign="center"; g.textBaseline="top";
-  rows.forEach((r,i)=> g.fillText("+"+r.step, X(i), pad.t+ph+7));
+    g.font = "11px "+css("var(--mono)");
+    const tw = Math.max(...lines.map(l => g.measureText(l.t).width)) + 20;
+    const th = lines.length*16 + 12;
+    // Flip to the left of the cursor near the right edge so the panel never
+    // runs off the canvas.
+    const fitsRight = cx + 14 + tw <= w - pad.r;
+    const bx = fitsRight ? cx + 14 : Math.max(pad.l, cx - 14 - tw);
+    const by = pad.t + 6;
+
+    g.fillStyle = css("var(--panel)"); g.globalAlpha = 0.97;
+    g.beginPath(); g.roundRect(bx, by, tw, th, 7); g.fill();
+    g.globalAlpha = 1;
+    g.strokeStyle = css("var(--line)"); g.lineWidth = 1; g.stroke();
+
+    g.textAlign = "left"; g.textBaseline = "top";
+    lines.forEach((l,i)=>{
+      g.font = (l.b ? "600 " : "") + "11px " + css("var(--mono)");
+      g.fillStyle = css(l.c);
+      g.fillText(l.t, bx + 10, by + 7 + i*16);
+    });
+  }
+
+  cv.onmousemove = ev => {
+    const r = cv.getBoundingClientRect();
+    const x = ev.clientX - r.left;
+    let best = null, bd = Infinity;
+    for(let i=0;i<n;i++){ const d = Math.abs(X(i)-x); if(d < bd){ bd = d; best = i; } }
+    const inside = x >= pad.l - 20 && x <= w - pad.r + 20;
+    const next = inside ? best : null;
+    if(next !== hover){ hover = next; render(); }
+    cv.style.cursor = hover != null ? "crosshair" : "default";
+  };
+  cv.onmouseleave = () => { if(hover != null){ hover = null; render(); } };
+
+  render();
 }
 
 async function loadBenchmark(){
@@ -1531,7 +1609,7 @@ async function loadBenchmark(){
         <div class="legend">
           <span><i style="background:var(--accent)"></i>World model, imagined rollout</span>
           <span><i style="background:var(--txt-faint)"></i>Persistence &mdash; assume the current stage holds</span>
-          <span style="color:var(--txt-faint)">x-axis: windows ahead &middot; y-axis: stage macro-F1</span>
+          <span style="color:var(--txt-faint)">x-axis: windows ahead &middot; y-axis: stage macro-F1 &middot; <strong>hover any point for exact values</strong></span>
         </div>
         <div class="hint">Persistence is the honest baseline for a forecaster: if
           a model cannot beat &ldquo;nothing will change&rdquo; on a dataset where
@@ -1657,6 +1735,8 @@ $("#scenario").onchange = e=> loadScenario(+e.target.value);
 
 window.addEventListener("resize", ()=>{
   redrawGraph();
+  const hz = $("#hzChart");
+  if(hz && BENCH_HZ) drawHorizonChart(hz, BENCH_HZ);
   if(!CURRENT) return;
   const fc = $("#fcChart"), at = $("#attnChart"), sp = $("#surpChart");
   const st = $("#stripChart");
