@@ -320,6 +320,13 @@ def main() -> None:
     # -- report -------------------------------------------------------------
     report = {
         "checkpoint": str(args.checkpoint),
+        # Which question these numbers answer. Without it a reader - or the
+        # dashboard - has to guess, and the dashboard guessed wrong: it labelled
+        # a temporal-split table "unseen malware families".
+        "split": {
+            "mode": split_mode,
+            "scenarios": ckpt.get("split", {}).get("scenarios"),
+        },
         "train_scenarios": train_scenarios,
         "val_scenarios": args.scenarios_val,
         "test_scenarios": args.scenarios_test,

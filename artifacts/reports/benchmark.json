@@ -239,5 +239,23 @@
       "persistence_oracle_macro_f1": 0.5510132840130152,
       "persistence_inferred_macro_f1": 0.4364580981861273
     }
-  ]
+  ],
+  "split": {
+    "mode": "temporal",
+    "scenarios": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ]
+  }
 }

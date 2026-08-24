@@ -137,6 +137,19 @@ select,.btn{width:100%;background:var(--panel-2);color:var(--txt);
 .stage.now .badge{background:var(--accent);color:#fff}
 .stage.pred .badge{background:var(--danger);color:#fff}
 
+/* ---------- benchmark: comparison bars + headline claim ---------- */
+/* A number is only meaningful next to what it beat, so every headline tile
+   carries the baseline it is being compared against. */
+.cmp{margin-top:11px;display:flex;flex-direction:column;gap:5px}
+.cmp-row{display:flex;align-items:center;gap:8px;font-size:10.5px}
+.cmp-row .cl{color:var(--txt-faint);width:82px;flex:0 0 82px}
+.cmp-row .cb{flex:1;height:7px;background:var(--panel-2);border-radius:4px;overflow:hidden}
+.cmp-row .cb i{display:block;height:100%;border-radius:4px}
+.cmp-row .cv{font-family:var(--mono);color:var(--txt-dim);width:42px;text-align:right}
+.bigclaim{font-size:14px;line-height:1.6;color:var(--txt);background:var(--panel-2);
+          border-left:3px solid var(--accent);border-radius:0 7px 7px 0;
+          padding:11px 14px;margin-bottom:13px}
+
 /* ---------- topology: floating overlays + full screen ---------- */
 .gcard{position:relative}
 /* Totals float over the canvas instead of occupying a row above it. In full
@@ -1394,46 +1407,166 @@ async function loadHost(host){
   catch(e){ fail(e.message); }
 }
 
+// Stage forecast against the persistence baseline, by horizon. This is the
+// comparison the project actually turns on, so it gets a chart rather than a
+// row in a table nobody reads from the back of a room.
+function drawHorizonChart(cv, rows, _t){
+  const _c = setupCanvas(cv, 210);
+  if(!_c){ retryDraw(t=>drawHorizonChart(cv,rows,t), _t); return; }
+  const {g,w,h} = _c;
+  const pad = {l:44, r:14, t:14, b:30};
+  const pw = w-pad.l-pad.r, ph = h-pad.t-pad.b;
+  const n = rows.length;
+  const X = i => pad.l + (n<=1 ? pw/2 : (i/(n-1))*pw);
+  const Y = v => pad.t + (1 - Math.min(v,1)) * ph;
+
+  g.clearRect(0,0,w,h);
+  g.strokeStyle = css("var(--line)"); g.fillStyle = css("var(--txt-faint)");
+  g.font = "10px "+css("var(--mono)"); g.lineWidth = 1;
+  for(let v=0; v<=0.8001; v+=0.2){
+    const y = Y(v);
+    g.beginPath(); g.moveTo(pad.l,y); g.lineTo(w-pad.r,y); g.stroke();
+    g.textAlign="right"; g.textBaseline="middle";
+    g.fillText(v.toFixed(1), pad.l-7, y);
+  }
+
+  const series = [
+    {key:"persistence_inferred_macro_f1", color:"var(--txt-faint)", dash:[5,4]},
+    {key:"stage_macro_f1",                color:"var(--accent)",    dash:[]},
+  ];
+  series.forEach(s=>{
+    g.beginPath();
+    rows.forEach((r,i)=> i ? g.lineTo(X(i), Y(r[s.key])) : g.moveTo(X(i), Y(r[s.key])));
+    g.strokeStyle = css(s.color); g.lineWidth = 2.5; g.setLineDash(s.dash);
+    g.stroke(); g.setLineDash([]);
+    rows.forEach((r,i)=>{
+      g.beginPath(); g.arc(X(i), Y(r[s.key]), 3, 0, 6.283);
+      g.fillStyle = css(s.color); g.fill();
+    });
+  });
+
+  g.fillStyle = css("var(--txt-faint)"); g.font = "10px "+css("var(--mono)");
+  g.textAlign="center"; g.textBaseline="top";
+  rows.forEach((r,i)=> g.fillText("+"+r.step, X(i), pad.t+ph+7));
+}
+
 async function loadBenchmark(){
   const el = $("#benchmarkTab");
   el.innerHTML = `<div class="msg"><span class="spin"></span>Loading benchmark…</div>`;
   try{
     const b = await api("/api/benchmark");
-    const rows = b.detection.map(r=>{
-      const best = r.model.toLowerCase().includes("world");
-      return `<tr class="${best?"best":""}">
-        <td>${r.model}</td>
-        <td class="num">${r.precision.toFixed(3)}</td>
-        <td class="num">${r.recall.toFixed(3)}</td>
-        <td class="num">${r.f1.toFixed(3)}</td>
-        <td class="num">${r.false_positive_rate.toFixed(3)}</td>
-        <td class="num">${isFinite(r.roc_auc)?r.roc_auc.toFixed(3):"n/a"}</td></tr>`;
-    }).join("");
-    const hz = b.forecast_by_horizon.map(r=>`<tr>
-        <td class="num">+${r.step}</td><td class="num">${r.seconds_ahead.toFixed(0)}s</td>
-        <td class="num">${r.f1.toFixed(3)}</td>
-        <td class="num">${isFinite(r.roc_auc)?r.roc_auc.toFixed(3):"n/a"}</td>
-        <td class="num">${r.false_positive_rate.toFixed(3)}</td></tr>`).join("");
+    const mode = (b.split && b.split.mode) || "temporal";
+
+    // The heading has to name the split. It used to read "unseen malware
+    // families" over whichever numbers happened to be in the file, which
+    // mislabels a temporal-split result as a generalisation result.
+    const scope = mode === "temporal"
+      ? { title: "Temporal split — trained on each capture's past, tested on its future",
+          note: `${(b.split.scenarios||[]).length} captures · ${(b.test_sequences||0).toLocaleString()} test sequences · ${fmtPct(b.test_positive_rate||0)} positive` }
+      : { title: "Held-out malware families — tested on families never seen in training",
+          note: `train ${(b.train_scenarios||[]).join(", ")} · test ${(b.test_scenarios||[]).join(", ")}` };
+
+    const det = b.detection || [];
+    const ours = det.find(r => r.model.toLowerCase().includes("world")) || {};
+    const best = det.filter(r => r !== ours)
+                    .reduce((a,r) => (!a || r.f1 > a.f1) ? r : a, null) || {};
+    const stage = b.stage_prediction || [];
+    const sOurs = stage.find(r => r.model.toLowerCase().includes("world")) || {};
+    const sBase = stage.find(r => r !== sOurs) || {};
+    const hz = b.forecast_by_horizon || [];
+    const wins = hz.filter(r => r.stage_macro_f1 > r.persistence_inferred_macro_f1).length;
+    const mid = hz[2] || hz[0] || {};
+
+    const bar = (v, ref) => {
+      const max = Math.max(v, ref, 0.001);
+      return `<div class="cmp">
+        <div class="cmp-row"><span class="cl">ours</span>
+          <span class="cb"><i style="width:${100*v/max}%;background:var(--accent)"></i></span>
+          <span class="cv">${v.toFixed(3)}</span></div>
+        <div class="cmp-row"><span class="cl">best baseline</span>
+          <span class="cb"><i style="width:${100*ref/max}%;background:var(--txt-faint)"></i></span>
+          <span class="cv">${ref.toFixed(3)}</span></div>
+      </div>`;
+    };
 
     el.innerHTML = `
       <div class="row"><div class="card">
-        <h3>Infiltration prediction on unseen malware families</h3>
+        <h3>${scope.title}</h3>
+        <div class="stat-sub" style="margin-top:-4px">${scope.note}</div>
+      </div></div>
+
+      <div class="row k3">
+        <div class="card tile ${Math.abs((ours.f1||0)-(best.f1||0)) < 0.01 ? "warn" : "safe"}">
+          <h3>Detection F1</h3>
+          <div class="stat">${(ours.f1||0).toFixed(3)}</div>
+          <div class="stat-sub">${Math.abs((ours.f1||0)-(best.f1||0)) < 0.01
+            ? "level with logistic regression &mdash; detection is not where this model earns its place"
+            : "against " + (best.f1||0).toFixed(3) + " for the best baseline"}</div>
+          ${bar(ours.f1||0, best.f1||0)}
+        </div>
+        <div class="card tile safe">
+          <h3>MITRE stage macro-F1</h3>
+          <div class="stat safe">${(sOurs.macro_f1||0).toFixed(3)}</div>
+          <div class="stat-sub">baseline ${(sBase.macro_f1||0).toFixed(3)}
+            &middot; ${Math.round(100*((sOurs.macro_f1||0)/(sBase.macro_f1||1)-1))}% better</div>
+          ${bar(sOurs.macro_f1||0, sBase.macro_f1||0)}
+        </div>
+        <div class="card tile safe">
+          <h3>False positive rate</h3>
+          <div class="stat safe">${(ours.false_positive_rate||0).toFixed(3)}</div>
+          <div class="stat-sub">an analyst is not buried in noise &middot;
+            recall ${(ours.recall||0).toFixed(3)}</div>
+        </div>
+      </div>
+
+      <div class="row"><div class="card">
+        <h3>Where the world model actually wins &mdash; forecasting the next stage</h3>
+        <div class="bigclaim">Rolled forward <strong>without seeing any traffic</strong>,
+          the stage forecast beats &ldquo;assume nothing changes&rdquo; at
+          <strong>${wins} of ${hz.length}</strong> horizons &mdash;
+          <strong>${(mid.stage_macro_f1||0).toFixed(3)}</strong> against
+          <strong>${(mid.persistence_inferred_macro_f1||0).toFixed(3)}</strong>
+          at ${mid.step || 3} windows ahead.</div>
+        <canvas id="hzChart"></canvas>
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>World model, imagined rollout</span>
+          <span><i style="background:var(--txt-faint)"></i>Persistence &mdash; assume the current stage holds</span>
+          <span style="color:var(--txt-faint)">x-axis: windows ahead &middot; y-axis: stage macro-F1</span>
+        </div>
+        <div class="hint">Persistence is the honest baseline for a forecaster: if
+          a model cannot beat &ldquo;nothing will change&rdquo; on a dataset where
+          hosts mostly stay put, it has not learned dynamics. The oracle variant
+          in the detail table is handed the true current stage and is therefore
+          not deployable.</div>
+      </div></div>
+
+      <div class="row"><div class="card">
+        <h3>Full numbers</h3>
         <table><thead><tr><th>Model</th><th class="num">Precision</th>
           <th class="num">Recall</th><th class="num">F1</th><th class="num">FPR</th>
-          <th class="num">ROC-AUC</th></tr></thead><tbody>${rows}</tbody></table>
-        <div class="hint">Trained on scenarios ${b.train_scenarios.join(", ")};
-          tested on ${b.test_scenarios.join(", ")} &mdash; malware families the
-          model never saw. Thresholds were selected on the validation split and
-          frozen before testing.</div>
-      </div></div>
-      <div class="row"><div class="card">
-        <h3>Forecast quality by horizon</h3>
-        <table><thead><tr><th class="num">Steps</th><th class="num">Ahead</th>
-          <th class="num">F1</th><th class="num">ROC-AUC</th>
-          <th class="num">FPR</th></tr></thead><tbody>${hz}</tbody></table>
-        <div class="hint">Each row scores predictions made without observing
-          that window &mdash; the model was cut off and rolled forward.</div>
+          <th class="num">ROC-AUC</th></tr></thead><tbody>
+          ${det.map(r=>`<tr class="${r===ours?"best":""}">
+            <td>${r.model}</td>
+            <td class="num">${r.precision.toFixed(3)}</td>
+            <td class="num">${r.recall.toFixed(3)}</td>
+            <td class="num">${r.f1.toFixed(3)}</td>
+            <td class="num">${r.false_positive_rate.toFixed(3)}</td>
+            <td class="num">${isFinite(r.roc_auc)?r.roc_auc.toFixed(3):"n/a"}</td></tr>`).join("")}
+        </tbody></table>
+        <div class="hint">
+          <table style="margin-top:10px"><thead><tr><th class="num">Ahead</th>
+            <th class="num">Stage macro-F1</th><th class="num">Persistence (inferred)</th>
+            <th class="num">Persistence (oracle)</th></tr></thead><tbody>
+            ${hz.map(r=>`<tr>
+              <td class="num">+${r.step} (${r.seconds_ahead.toFixed(0)}s)</td>
+              <td class="num">${r.stage_macro_f1.toFixed(3)}</td>
+              <td class="num">${r.persistence_inferred_macro_f1.toFixed(3)}</td>
+              <td class="num">${r.persistence_oracle_macro_f1.toFixed(3)}</td></tr>`).join("")}
+          </tbody></table>
+        </div>
       </div></div>`;
+
+    drawHorizonChart($("#hzChart"), hz);
     collapseHints(el);
   }catch(e){
     el.innerHTML = `<div class="msg">${e.message}<br><br>
