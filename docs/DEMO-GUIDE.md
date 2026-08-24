@@ -190,6 +190,26 @@ bajaye amber hai — escalation aur de-escalation ek jaise nahi dikhne chahiye.
 | *"SHAP kyun nahi?"* | "SHAP ko hazaar forward passes chahiye, ye interactive dashboard mein nahi chalta. Integrated gradients 32 backward passes mein ho jaata hai. SHAP humne offline cross-check ke liye rakha hai — `src/explain.py` mein hai." |
 | *"Pehle kya use kar rahe the?"* | "Plain gradient × input. Wo confident predictions pe toot jaata tha — gradient 1e-3 pe collapse ho jaata aur har feature barabar lagta. Isliye badla." |
 
+#### Temporal attention panel (sabse neeche)
+
+Ye panel batata hai ki model ne **kaunse purane minute** dekhe. Bas ye teen line
+bolni hai:
+
+> "Model ke paas 120 minute ka past tha. Agar wo sab pe barabar dhyaan deta to
+> har minute ko 0.8% milta. Lekin usne **25% attention sirf 5 minute pe** daala —
+> aur sabse zyada 23 minute pehle wale pe, jo average se **7.7 guna** hai.
+>
+> Matlab model sirf pichhla minute nahi dekh raha. Wo timeline mein peechhe
+> jaakar wo point uthata hai jahan se ye host badalna shuru hua."
+
+**Judge poochh sakta hai:**
+
+| Sawal | Jawab |
+|---|---|
+| *"Ye attention asli hai ya baad mein banaya?"* | "Asli hai. Ye wahi causal-attention weights hain jo prediction head ne consume kiye — model ke andar se nikle hain, koi post-hoc approximation nahi." |
+| *"7.7x even ka matlab?"* | "Agar model bina soche saare 120 minute ko barabar wajan deta, to har ek ko 0.8% milta. Is minute ko 6.4% mila — yaani 7.7 guna zyada. Number khud panel pe likha hai." |
+| *"Sirf 25% hi? Baaki 75% kahan gaya?"* | "Baaki 115 minute mein bikhra hua hai. Hum keval top 5 dikha rahe hai — 120 bars dikhane ka koi fayda nahi tha." |
+
 ---
 
 ## 3. Scenario 9 — **do channels wala moment**

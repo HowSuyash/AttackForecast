@@ -158,6 +158,31 @@ select,.btn{width:100%;background:var(--panel-2);color:var(--txt);
 .chain-cap strong.w{color:var(--warn)}
 .chain-cap .arw{color:var(--txt-faint);margin:0 7px;font-size:16px}
 
+/* ---------- temporal attention ---------- */
+/* A ranked list rather than a sparse bar chart. The old chart plotted five
+   bars at even spacing while labelling them with uneven offsets (-24, -23,
+   -22, -21, -10), which drew a time axis that was not a time axis. */
+.attn-head{font-size:13.5px;line-height:1.55;color:var(--txt-dim);margin-bottom:14px}
+.attn-head strong{color:var(--accent);font-weight:650}
+.attn-row{display:grid;grid-template-columns:66px 96px 1fr 52px 76px;
+          align-items:center;gap:10px;padding:5px 0}
+.attn-row .rk{font-size:8.5px;text-transform:uppercase;letter-spacing:.6px;
+              font-weight:700;color:var(--accent);text-align:right}
+.attn-row .lb{font-size:12.5px;font-weight:600}
+.attn-row .br{height:17px;background:var(--panel-2);border-radius:3px;overflow:hidden}
+.attn-row .br i{display:block;height:100%;background:var(--accent);
+                opacity:.42;border-radius:3px}
+.attn-row.top .br i{opacity:1}
+.attn-row .vl{font-family:var(--mono);font-size:12.5px;text-align:right;font-weight:600}
+.attn-row .mx{font-family:var(--mono);font-size:11px;color:var(--txt-faint)}
+.attn-foot{margin-top:12px;font-size:12px;color:var(--txt-faint);line-height:1.5}
+@media(max-width:720px){
+  .attn-row{grid-template-columns:56px 1fr 48px;row-gap:2px}
+  .attn-row .lb{grid-column:2}
+  .attn-row .br{grid-column:1/-1;order:9}
+  .attn-row .mx{display:none}
+}
+
 /* ---------- benchmark: comparison bars + headline claim ---------- */
 /* A number is only meaningful next to what it beat, so every headline tile
    carries the baseline it is being compared against. */
@@ -899,29 +924,57 @@ function drawSurprise(cv, timeline, _t, frac){
   }
 }
 
-function drawAttention(cv, attn, _t){
-  const _c = setupCanvas(cv, 92);
-  if(!_c){ retryDraw(t=>drawAttention(cv,attn,t), _t); return; }
-  const {g,w,h} = _c;
-  g.clearRect(0,0,w,h);
+// An attention weight is a share of a softmax over every past window, so 0.064
+// says nothing on its own - what matters is 0.064 against the 1/T a model
+// spreading its attention evenly would hand out. The multiple is the number a
+// person can reason about, so that is the number on the row.
+//
+// `total` is the length of the analysed slice, which is exactly what the model
+// attended over: the endpoint tails the capture and builds both the timeline
+// and the observation tensor from that same slice.
+function renderAttention(el, attn, total){
+  if(!el) return;
   if(!attn || !attn.length){
-    g.fillStyle=css("var(--txt-faint)"); g.font="12px "+css("var(--sans)");
-    g.textAlign="center"; g.fillText("No attention mass to show.", w/2, h/2); return;
+    el.innerHTML = `<div class="msg">No attention mass to show.</div>`;
+    return;
   }
-  const sorted = [...attn].sort((a,b)=>a.window_offset-b.window_offset);
-  const max = Math.max(...sorted.map(a=>a.weight), 1e-6);
-  const bw = Math.min(60, (w-20)/sorted.length - 8);
-  const gap = (w-20-bw*sorted.length)/Math.max(1,sorted.length-1);
-  sorted.forEach((a,i)=>{
-    const x = 10 + i*(bw+gap), bh = Math.max(3,(a.weight/max)*(h-34));
-    g.fillStyle = css("var(--accent)"); g.globalAlpha = .35 + .65*(a.weight/max);
-    g.fillRect(x, h-24-bh, bw, bh); g.globalAlpha=1;
-    g.fillStyle = css("var(--txt-faint)"); g.font="10px "+css("var(--mono)");
-    g.textAlign="center"; g.textBaseline="top";
-    g.fillText(a.window_offset===0?"now":a.window_offset+"m", x+bw/2, h-18);
-  });
-}
+  const rows = [...attn].sort((a,b)=>b.weight-a.weight);
+  const max = rows[0].weight;
+  const mass = rows.reduce((s,a)=>s+a.weight, 0);
 
+  // If an offset reaches past the slice we were told about, the denominator is
+  // not the one the model used - drop the comparison rather than print a
+  // multiple that cannot be defended.
+  const span = Math.max(...rows.map(a=>Math.abs(a.window_offset)));
+  const ok = total > 1 && span < total;
+  const even = ok ? 1/total : 0;
+
+  const head = ok
+    ? `These <strong>${rows.length}</strong> minutes carry
+       <strong>${fmtPct(mass)}</strong> of the model's attention, out of the
+       <strong>${total}</strong> past minutes it could have drawn on. Spread
+       evenly, each minute would get ${fmtPct(even)}.`
+    : `These ${rows.length} past minutes carry <strong>${fmtPct(mass)}</strong>
+       of the model's attention.`;
+
+  const body = rows.map((a,i)=>{
+    const mins = Math.abs(a.window_offset);
+    return `<div class="attn-row${i?"":" top"}">
+      <span class="rk">${i ? "" : "strongest"}</span>
+      <span class="lb">${mins === 0 ? "this minute" : mins + " min ago"}</span>
+      <span class="br"><i style="width:${(100*a.weight/max).toFixed(1)}%"></i></span>
+      <span class="vl">${fmtPct(a.weight)}</span>
+      <span class="mx">${ok ? (a.weight/even).toFixed(1)+"&times; even" : ""}</span>
+    </div>`;
+  }).join("");
+
+  const foot = ok
+    ? `<div class="attn-foot">The remaining ${fmtPct(1-mass)} is spread across
+       the other ${total - rows.length} minutes.</div>`
+    : "";
+
+  el.innerHTML = `<div class="attn-head">${head}</div>${body}${foot}`;
+}
 /* ------------------------------------------------------------------ */
 /* Rendering                                                           */
 /* ------------------------------------------------------------------ */
@@ -1303,7 +1356,7 @@ function renderForecast(d){
 
     <div class="row"><div class="card">
       <h3>Temporal attention &mdash; which past windows drove this</h3>
-      <canvas id="attnChart"></canvas>
+      <div id="attnChart"></div>
       <div class="hint">These are the causal-attention weights the prediction
         heads actually consumed, not a post-hoc approximation.</div>
     </div></div>`;
@@ -1311,7 +1364,7 @@ function renderForecast(d){
   drawForecast($("#fcChart"), d.timeline, d.forecast, p.threshold);
   drawKillStrip($("#stripChart"), d.timeline, null);
   drawSurprise($("#surpChart"), d.timeline);
-  drawAttention($("#attnChart"), ex.temporal_attention);
+  renderAttention($("#attnChart"), ex.temporal_attention, (d.timeline||[]).length);
   collapseHints($("#forecastTab"));
 
   $("#playBtn").onclick = replayToggle;
@@ -1807,9 +1860,9 @@ function selectTab(which){
         drawForecast($("#fcChart"), CURRENT.timeline, CURRENT.forecast,
                      CURRENT.prediction.threshold);
         drawKillStrip($("#stripChart"), CURRENT.timeline, null);
+        // replayRender draws this one itself, with the playhead on it.
+        drawSurprise($("#surpChart"), CURRENT.timeline);
       }
-      drawSurprise($("#surpChart"), CURRENT.timeline);
-      drawAttention($("#attnChart"), (CURRENT.explanation||{}).temporal_attention);
     }
     if(which==="topology" && TOPOLOGY && $("#graphChart")){
       redrawGraph();
@@ -1833,7 +1886,7 @@ window.addEventListener("resize", ()=>{
   const hz = $("#hzChart");
   if(hz && BENCH_HZ) drawHorizonChart(hz, BENCH_HZ);
   if(!CURRENT) return;
-  const fc = $("#fcChart"), at = $("#attnChart"), sp = $("#surpChart");
+  const fc = $("#fcChart"), sp = $("#surpChart");
   const st = $("#stripChart");
 
   // Hand back to the replay renderer when playback owns the chart. Redrawing
@@ -1848,7 +1901,6 @@ window.addEventListener("resize", ()=>{
     // playhead. Redrawing it here wiped that marker on every resize.
     if(sp) drawSurprise(sp, CURRENT.timeline);
   }
-  if(at) drawAttention(at, (CURRENT.explanation||{}).temporal_attention);
 });
 
 (async function init(){
