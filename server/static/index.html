@@ -256,6 +256,11 @@ let META = null, CURRENT = null, SCENARIO = null, UPLOAD = null, TOPOLOGY = null
 // Replay frames that arrived with an upload, waiting for renderForecast to
 // pick them up instead of fetching from /api/replay.
 let PENDING_REPLAY = null;
+// Triage rows keyed by host. The detail view needs to know *why* a host was
+// flagged: an anomaly-flagged host has a genuinely flat risk chart, and three
+// tiles reading 0.0% / 0.0% / "no crossing" next to a 4.1-sigma badge in the
+// sidebar reads as a broken page rather than as the two channels disagreeing.
+let HOST_ROWS = {};
 
 /* ------------------------------------------------------------------ */
 /* Charting. Hand-rolled on canvas: a chart library would be another
@@ -777,6 +782,27 @@ function renderForecast(d){
   const p = d.prediction, c = d.current, ex = d.explanation || {};
   const eta = p.seconds_to_alert!=null ? Math.round(p.seconds_to_alert/60)+" min" : "no crossing";
 
+  // A host the anomaly channel flagged has a legitimately flat risk chart - its
+  // evidence lives in the novelty signal, not the supervised head. Swap the
+  // third tile to say so, otherwise the page shows three zeros beside a sigma
+  // badge in the sidebar and looks broken.
+  const row = HOST_ROWS[d.host] || {};
+  const byAnomaly = row.flag_reason === "anomaly";
+  const peakSurprise = Math.max(0, ...(d.timeline || []).map(t => t.surprise || 0));
+
+  const thirdTile = byAnomaly
+    ? `<div class="card tile warn">
+         <h3>Anomaly score</h3>
+         <div class="stat warn">${(row.surprise_z || 0).toFixed(1)}&sigma;</div>
+         <div class="stat-sub">flagged by novelty, not by the risk head
+           &middot; peak surprise ${peakSurprise.toFixed(1)}</div>
+       </div>`
+    : `<div class="card tile ${p.steps_to_alert!=null?"warn":"safe"}">
+         <h3>Time to threshold</h3>
+         <div class="stat ${p.steps_to_alert!=null?"warn":"safe"}">${eta}</div>
+         <div class="stat-sub">at ${fmtPct(p.threshold)} alert threshold</div>
+       </div>`;
+
   $("#forecastTab").innerHTML = `
     <div class="row k3">
       <div class="card tile ${riskClass(c.risk)}">
@@ -791,12 +817,18 @@ function renderForecast(d){
           ? "<span style='color:var(--danger)'>Kill-chain progression predicted</span>"
           : "No stage advance predicted"}</div>
       </div>
-      <div class="card tile ${p.steps_to_alert!=null?"warn":"safe"}">
-        <h3>Time to threshold</h3>
-        <div class="stat ${p.steps_to_alert!=null?"warn":"safe"}">${eta}</div>
-        <div class="stat-sub">at ${fmtPct(p.threshold)} alert threshold</div>
-      </div>
+      ${thirdTile}
     </div>
+
+    ${byAnomaly ? `<div class="row"><div class="card">
+      <h3>Why this host is listed</h3>
+      <div class="narr">The supervised risk head scores this host near zero, so
+        the probability chart below is flat &mdash; that is not a rendering
+        fault. It was flagged by the <strong>novelty channel</strong>: its
+        traffic sits ${(row.surprise_z||0).toFixed(1)} robust deviations above
+        the median for this capture. The evidence is in the
+        <strong>Model surprise</strong> panel, not the risk chart.</div>
+    </div></div>` : ""}
 
     <div class="row"><div class="card">
       <h3>Infiltration probability &mdash; observed and forecast</h3>
@@ -984,6 +1016,8 @@ async function loadTopology(){
 }
 
 function renderHosts(list, onPick){
+  HOST_ROWS = {};
+  list.forEach(h => { HOST_ROWS[h.host] = h; });
   $("#hostList").innerHTML = list.length ? list.map((h,i)=>{
     // Two independent channels, shown separately rather than blended: the
     // supervised risk score, and how anomalous the host is relative to the rest
