@@ -119,23 +119,44 @@ select,.btn{width:100%;background:var(--panel-2);color:var(--txt);
 .card.tile.safe::before{background:var(--safe)}
 
 /* ---------- kill chain ---------- */
-.chain{display:flex;align-items:stretch;gap:0}
-.stage{flex:1;position:relative;padding:11px 8px;text-align:center;
-       background:var(--panel-2);border:1px solid var(--line);
-       border-right:none;transition:.2s}
-.stage:first-child{border-radius:7px 0 0 7px}
-.stage:last-child{border-radius:0 7px 7px 0;border-right:1px solid var(--line)}
-.stage .nm{font-size:11px;font-weight:600}
-.stage .tid{font-size:9.5px;color:var(--txt-faint);font-family:var(--mono);margin-top:3px}
-.stage.now{background:var(--accent-wash);border-color:var(--accent);z-index:2}
-.stage.now .nm{color:var(--accent)}
-.stage.pred{background:var(--danger-wash);border-color:var(--danger);z-index:2}
-.stage.pred .nm{color:var(--danger)}
-.stage .badge{position:absolute;top:-8px;left:50%;transform:translateX(-50%);
-              font-size:9px;padding:1px 6px;border-radius:9px;white-space:nowrap;
-              text-transform:uppercase;letter-spacing:.5px;font-weight:600}
-.stage.now .badge{background:var(--accent);color:#fff}
-.stage.pred .badge{background:var(--danger);color:#fff}
+/* Chevrons, not boxes. This panel's whole job is to say the attack moves left
+   to right, and a row of identical rectangles says nothing about direction.
+   The two live cards are solid fills rather than tints because this is the one
+   row a judge reads from the back of the room without leaning in. */
+.chain{display:flex;align-items:stretch;gap:3px}
+.stage{flex:1;position:relative;padding:13px 10px 12px 24px;text-align:center;
+       background:var(--panel-2);transition:background .25s,color .25s;
+       clip-path:polygon(0 0,calc(100% - 15px) 0,100% 50%,
+                         calc(100% - 15px) 100%,0 100%,15px 50%)}
+.stage:first-child{padding-left:12px;
+       clip-path:polygon(0 0,calc(100% - 15px) 0,100% 50%,
+                         calc(100% - 15px) 100%,0 100%)}
+.stage:last-child{clip-path:polygon(0 0,100% 0,100% 100%,0 100%,15px 50%)}
+.stage .nm{font-size:13px;font-weight:650;letter-spacing:.2px;line-height:1.25}
+.stage .tid{font-size:9.5px;color:var(--txt-faint);font-family:var(--mono);margin-top:2px}
+.stage .badge{display:inline-block;font-size:8.5px;padding:1px 7px;margin-bottom:5px;
+              border-radius:9px;white-space:nowrap;text-transform:uppercase;
+              letter-spacing:.6px;font-weight:700;background:var(--line);
+              color:var(--txt-faint)}
+.stage .badge.empty{visibility:hidden}
+.stage.now{background:var(--accent)}
+.stage.now .nm{color:#fff}
+.stage.now .tid{color:rgba(255,255,255,.72)}
+.stage.now .badge{background:rgba(255,255,255,.24);color:#fff}
+.stage.pred{background:var(--danger);animation:chainpulse 1.7s ease-in-out infinite}
+.stage.pred.down{background:var(--warn)}
+.stage.pred .nm{color:#fff}
+.stage.pred .tid{color:rgba(255,255,255,.72)}
+.stage.pred .badge{background:rgba(255,255,255,.24);color:#fff}
+.stage.na .nm{color:var(--txt-faint);font-weight:600}
+@keyframes chainpulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.22)}}
+@media(prefers-reduced-motion:reduce){.stage.pred{animation:none}}
+/* One sentence under the chevrons, sized to be read rather than scanned. */
+.chain-cap{margin-top:11px;font-size:14.5px;line-height:1.4;color:var(--txt-dim)}
+.chain-cap strong{color:var(--accent);font-weight:650}
+.chain-cap strong.d{color:var(--danger)}
+.chain-cap strong.w{color:var(--warn)}
+.chain-cap .arw{color:var(--txt-faint);margin:0 7px;font-size:16px}
 
 /* ---------- benchmark: comparison bars + headline claim ---------- */
 /* A number is only meaningful next to what it beat, so every headline tile
@@ -359,9 +380,9 @@ function css(v){
     : v;
 }
 
-function drawForecast(cv, timeline, forecast, threshold, _t){
+function drawForecast(cv, timeline, forecast, threshold, _t, ghost){
   const _c = setupCanvas(cv, 200);
-  if(!_c){ retryDraw(t=>drawForecast(cv,timeline,forecast,threshold,t), _t); return; }
+  if(!_c){ retryDraw(t=>drawForecast(cv,timeline,forecast,threshold,t,ghost), _t); return; }
   const {g,w,h} = _c;
   const pad = {l:44, r:16, t:14, b:28};
   const pw = w-pad.l-pad.r, ph = h-pad.t-pad.b;
@@ -373,9 +394,15 @@ function drawForecast(cv, timeline, forecast, threshold, _t){
   // point of the panel - into the rightmost 8% of the chart.
   const FUT_FRAC = 0.32;
   const obsW = pw * (1 - FUT_FRAC), futW = pw * FUT_FRAC;
+  // During replay the axis is pinned to the whole capture instead of to the
+  // windows seen so far. Rescaling every frame kept the observed line filling
+  // the same width from the first frame to the last, so playback advanced a
+  // clock and nothing else - which is the one thing this panel exists to show.
+  const axisN = Math.max(nPast, ghost ? ghost.length : nPast);
+  const obsX = i => pad.l + (axisN <= 1 ? 0 : (i / (axisN - 1)) * obsW);
   const X = i => (i <= nPast - 1)
-    ? pad.l + (nPast <= 1 ? 0 : (i / (nPast - 1)) * obsW)
-    : pad.l + obsW + ((i - (nPast - 1)) / Math.max(1, nFut)) * futW;
+    ? obsX(i)
+    : obsX(nPast - 1) + ((i - (nPast - 1)) / Math.max(1, nFut)) * futW;
   const Y = v => pad.t + (1-v)*ph;
 
   g.clearRect(0,0,w,h);
@@ -417,6 +444,21 @@ function drawForecast(cv, timeline, forecast, threshold, _t){
       g.fillRect(x0, pad.t, Math.max(1,x1-x0), ph);
     }
   });
+
+  // The rest of the capture, drawn faint. Without it the right half of the
+  // chart is empty during playback and reads as a broken panel rather than as
+  // time the model has not reached yet.
+  if(ghost){
+    g.globalAlpha = .15; g.lineWidth = 2;
+    for(let i=1;i<ghost.length;i++){
+      g.beginPath();
+      g.moveTo(obsX(i-1), Y(ghost[i-1].risk));
+      g.lineTo(obsX(i),   Y(ghost[i].risk));
+      g.strokeStyle = css(STAGE_COLORS[ghost[i].stage] || "var(--accent)");
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
 
   // uncertainty band across the forecast
   if(nFut){
@@ -473,8 +515,8 @@ function drawForecast(cv, timeline, forecast, threshold, _t){
   // x labels
   g.fillStyle = css("var(--txt-faint)"); g.font="10px "+css("var(--mono)");
   g.textAlign="center"; g.textBaseline="top";
-  const step = Math.max(1, Math.floor(nPast/6));
-  for(let i=0;i<nPast;i+=step) g.fillText("-"+(nPast-1-i)+"m", X(i), pad.t+ph+7);
+  const step = Math.max(1, Math.floor(axisN/6));
+  for(let i=0;i<axisN;i+=step) g.fillText("-"+(axisN-1-i)+"m", obsX(i), pad.t+ph+7);
   if(nFut) g.fillText("+"+nFut+"m", X(total-1), pad.t+ph+7);
 }
 
@@ -809,9 +851,9 @@ function drawGraph(cv, data, height, _t){
   frame();
 }
 
-function drawSurprise(cv, timeline, _t){
+function drawSurprise(cv, timeline, _t, frac){
   const _c = setupCanvas(cv, 110);
-  if(!_c){ retryDraw(t=>drawSurprise(cv,timeline,t), _t); return; }
+  if(!_c){ retryDraw(t=>drawSurprise(cv,timeline,t,frac), _t); return; }
   const {g,w,h} = _c;
   const pad = {l:44, r:16, t:12, b:24};
   const pw = w-pad.l-pad.r, ph = h-pad.t-pad.b;
@@ -846,6 +888,15 @@ function drawSurprise(cv, timeline, _t){
 
   g.fillStyle="rgba(122,69,209,.13)";
   g.lineTo(X(vals.length-1), pad.t+ph); g.lineTo(X(0), pad.t+ph); g.closePath(); g.fill();
+
+  if(frac != null){
+    const x = pad.l + Math.min(1, Math.max(0, frac)) * pw;
+    g.strokeStyle = css("var(--txt-dim)"); g.lineWidth = 1.5; g.setLineDash([3,3]);
+    g.beginPath(); g.moveTo(x, pad.t); g.lineTo(x, pad.t+ph); g.stroke();
+    g.setLineDash([]);
+    g.beginPath(); g.arc(x, pad.t+ph, 4, 0, Math.PI*2);
+    g.fillStyle = css("var(--initial)"); g.fill();
+  }
 }
 
 function drawAttention(cv, attn, _t){
@@ -931,17 +982,45 @@ function stageLegend(d){
         : "");
 }
 
+// Wrapped in an id so replay can swap it per frame. A frozen kill chain while
+// the timeline plays underneath it was the panel contradicting the demo.
 function killChain(cur, pred){
   const stages = META.stages.filter(s=>s.id>0);
-  return `<div class="chain">` + stages.map(s=>{
+  const nameOf = id => (META.stages.find(s=>s.id===id)||{}).name || "unknown";
+
+  const cards = stages.map(s=>{
     const isNow = s.id===cur, isPred = s.id===pred && pred!==cur;
-    const cls = isNow?"now":isPred?"pred":"";
-    const badge = isNow?`<span class="badge">now</span>`
-                : isPred?`<span class="badge">predicted</span>`:"";
-    return `<div class="stage ${cls}">${badge}
+    // A stage the model was never given enough data to emit is labelled as
+    // such, so an empty card is not mistaken for "the attack is not here".
+    const na = !isNow && !isPred && !!UNLEARNED_STAGES[s.id];
+    // The forecast is not always an escalation - the model does predict drops
+    // back down the chain. Painting those the same alarm red as a real
+    // progression would say the opposite of what the model concluded.
+    const cls = isNow ? "now"
+              : isPred ? (pred < cur ? "pred down" : "pred")
+              : na ? "na" : "";
+    const badge = isNow ? "now" : isPred ? "predicted" : na ? "not learned" : "";
+    return `<div class="stage ${cls}">
+      <div class="badge${badge?"":" empty"}">${badge||"&nbsp;"}</div>
       <div class="nm">${s.name}</div>
       <div class="tid">${s.technique_id}</div></div>`;
-  }).join("") + `</div>`;
+  }).join("");
+
+  const cap = pred===cur
+    ? `Holding at <strong>${nameOf(cur)}</strong> &mdash; the model predicts no
+       stage change over the next ten minutes.`
+    : pred < cur
+      ? `<strong>${nameOf(cur)}</strong> now
+         <span class="arw">&rarr;</span>
+         model predicts a step back to <strong class="w">${nameOf(pred)}</strong>`
+      : `<strong>${nameOf(cur)}</strong> now
+         <span class="arw">&rarr;</span>
+         <strong class="d">${nameOf(pred)}</strong> predicted next`;
+
+  return `<div id="chainRow">
+    <div class="chain">${cards}</div>
+    <div class="chain-cap">${cap}</div>
+  </div>`;
 }
 
 function featureBars(items){
@@ -998,12 +1077,28 @@ function replayRender(){
     stage_name: (META.stages[f.forecast_stage[i]]||{}).name || "",
   }));
 
-  drawForecast($("#fcChart"), seen, forecast, 0.5);
+  drawForecast($("#fcChart"), seen, forecast, 0.5, undefined, REPLAY.timeline);
   drawKillStrip($("#stripChart"), REPLAY.timeline, cut);
 
+  // Re-rendered only when the stage pair actually changes. Replacing the node
+  // every frame restarted the predicted card's pulse each tick, so it stuttered
+  // instead of breathing. The key rides on the element, so a fresh static
+  // render always repaints on the first replay frame.
+  const peak = Math.max(...f.forecast_stage);
+  const key = f.stage + ">" + peak;
+  const chain = $("#chainRow");
+  if(chain && chain.dataset.key !== key){
+    chain.outerHTML = killChain(f.stage, peak);
+    $("#chainRow").dataset.key = key;
+  }
+
   const mins = REPLAY.timeline.length;
+  const sp = $("#surpChart");
+  if(sp && CURRENT) drawSurprise(sp, CURRENT.timeline, undefined, mins>1 ? cut/(mins-1) : 0);
+
   $("#rClock").textContent =
     `minute ${cut+1} / ${mins}  ·  risk ${(100*f.risk).toFixed(1)}%  ·  ` +
+    `surprise ${f.surprise.toFixed(2)}  ·  ` +
     `${(META.stages[f.stage]||{}).name || "?"}`;
   $("#rSlider").value = RPOS;
 }
@@ -1749,8 +1844,10 @@ window.addEventListener("resize", ()=>{
   }else{
     if(fc) drawForecast(fc, CURRENT.timeline, CURRENT.forecast, CURRENT.prediction.threshold);
     if(st) drawKillStrip(st, CURRENT.timeline, null);
+    // Only outside playback: replayRender draws this one itself, with the
+    // playhead. Redrawing it here wiped that marker on every resize.
+    if(sp) drawSurprise(sp, CURRENT.timeline);
   }
-  if(sp) drawSurprise(sp, CURRENT.timeline);
   if(at) drawAttention(at, (CURRENT.explanation||{}).temporal_attention);
 });
 

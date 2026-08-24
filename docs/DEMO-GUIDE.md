@@ -99,6 +99,7 @@ Ye sabse important 45 second hain. Yahi tumhe baaki teams se alag karta hai.
 |---|---|
 | *"100% confidence? Ye overconfident nahi hai?"* | "Ye us host pe hai jo poore capture mein malicious tha, to model ke paas bahut evidence hai. Jahan evidence kam hota hai wahan score kam aata hai — main dikha sakta hu." |
 | *"Time to threshold ka matlab?"* | "Kitne minute baad model ko lagta hai risk 50% cross kar jaayega. Analyst ke liye ye 'kitna time hai' wala number hai." |
+| *"Kill chain peechhe kyun jaa raha hai?"* | "Model ka apna forecast hai — wo predict kar raha hai ki agle 10 minute mein host Exfiltration se wapas Reconnaissance jaisi activity pe aa jaayega. Ye galat bhi ho sakta hai, aur isliye humne usko laal nahi, amber rakha hai — de-escalation ko escalation jaisa dikhana galat hota." |
 
 ### 2.3 Forecast chart — **yahan rukna, ye core hai**
 
@@ -112,6 +113,24 @@ Ye sabse important 45 second hain. Yahi tumhe baaki teams se alag karta hai.
 
 > "Ab dekho. Har minute pe model ek forecast banata hai, phir waqt aage badhta
 > hai aur pata chalta hai ki wo sahi tha ya nahi."
+
+**Play ke dauraan kya point karna** (teen cheezein hilti hain — inhi pe ungli
+rakhna, warna judge ko lagega bas timer chal raha hai):
+
+1. **Playhead** — "now" wala divider baayein se daayein safar karta hai. Uske
+   aage ki **halki line** wo waqt hai jo model ne abhi dekha hi nahi.
+2. **Neeche kill chain** — NOW aur PREDICTED card badalte hain jaise stage
+   badalta hai. Ye sabse dikhne wali cheez hai, judge ka dhyaan idhar le jaana.
+3. **Model surprise chart** — usme bhi ek playhead saath-saath chalta hai, aur
+   clock mein surprise ka number badalta rehta hai.
+
+> **Timing:** Normal speed pe poora capture ~1 minute leta hai. Agar time kam ho
+> to dropdown se **Fast** chuno (~20 second), ya 15 second chalne dene ke baad
+> Pause dabakar baat aage badhao — poora chalana zaroori nahi hai.
+
+**Agar kill chain amber ho jaaye** ("step back to Reconnaissance"): ye bug nahi
+hai, model sach mein neeche wala stage predict kar raha hai. Isliye wo laal ke
+bajaye amber hai — escalation aur de-escalation ek jaise nahi dikhne chahiye.
 
 **Ek baat pehle se bol dena (warna judge poochhega):**
 
