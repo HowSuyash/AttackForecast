@@ -25,13 +25,15 @@ pasted in.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.dml import MSO_LINE_DASH_STYLE
+from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
@@ -298,6 +300,299 @@ def find(slide, name_startswith):
 
 
 # --------------------------------------------------------------------------
+# Diagram primitives
+# --------------------------------------------------------------------------
+# The template asks for "points / diagrams / infographics", not paragraphs, and
+# a deck read from the back of a room is carried by shape and colour long
+# before anybody parses a sentence. These build the recurring figures - mind
+# map, arrow flow, chain, shields, hangers, pillars, hub, ring - so each slide
+# is a picture with labels rather than three columns of prose.
+
+ORANGE = RGBColor(0xE3, 0x7B, 0x2A)
+PURPLE = RGBColor(0x7A, 0x45, 0xD1)
+TEAL = RGBColor(0x11, 0x83, 0x8B)
+PINK = RGBColor(0xC2, 0x3B, 0x77)
+AMBER = RGBColor(0xB8, 0x7D, 0x00)
+PALETTE = [BLUE, TEAL, ORANGE, PURPLE, GREEN, PINK]
+
+
+def _flat(shape, fill, line=None, line_w=1.0):
+    """Flat fill, no shadow. PowerPoint's default shadow reads as clip art."""
+    shape.shadow.inherit = False
+    if fill is None:
+        shape.fill.background()
+    else:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = fill
+    if line is None:
+        shape.line.fill.background()
+    else:
+        shape.line.color.rgb = line
+        shape.line.width = Pt(line_w)
+    return shape
+
+
+def _write(tf, lines, *, size=10, color=WHITE, bold=False, align=PP_ALIGN.CENTER,
+           anchor=MSO_ANCHOR.MIDDLE, spacing=0):
+    """Write into a text frame. Each line is a str or (text, size, bold)."""
+    tf.word_wrap = True
+    tf.vertical_anchor = anchor
+    tf.margin_left = tf.margin_right = Pt(4)
+    tf.margin_top = tf.margin_bottom = Pt(2)
+    norm = [(l if isinstance(l, tuple) else (l, size, bold)) for l in lines]
+    for i, (text, sz, bd) in enumerate(norm):
+        para = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        para.alignment = align
+        if spacing and i:
+            para.space_before = Pt(spacing)
+        run = para.add_run()
+        run.text = text
+        run.font.size = Pt(sz)
+        run.font.bold = bd
+        run.font.color.rgb = color
+        run.font.name = BODY_FONT
+    return tf
+
+
+def shp(slide, kind, x, y, w, h, *, fill=BLUE, line=None, line_w=1.0, lines=(),
+        size=10, color=WHITE, bold=False, anchor=MSO_ANCHOR.MIDDLE,
+        align=PP_ALIGN.CENTER):
+    sh = slide.shapes.add_shape(kind, Inches(x), Inches(y), Inches(w), Inches(h))
+    _flat(sh, fill, line, line_w)
+    if lines:
+        _write(sh.text_frame, lines, size=size, color=color, bold=bold,
+               align=align, anchor=anchor)
+    else:
+        sh.text_frame.text = ""
+    return sh
+
+
+def label(slide, x, y, w, h, lines, *, size=9, color=SLATE, bold=False,
+          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.TOP, spacing=0):
+    tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    _write(tb.text_frame, lines, size=size, color=color, bold=bold,
+           align=align, anchor=anchor, spacing=spacing)
+    return tb
+
+
+def connect(slide, x1, y1, x2, y2, *, color=CARD_LINE, width=1.0, dash=True):
+    ln = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1),
+                                    Inches(y1), Inches(x2), Inches(y2))
+    ln.line.color.rgb = color
+    ln.line.width = Pt(width)
+    if dash:
+        ln.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+    return ln
+
+
+def section(slide, x, y, w, text, *, color=NAVY, size=12.5):
+    """A heading with a colour rule under it, as on the reference deck."""
+    label(slide, x, y, w, 0.28, [text], size=size, color=color, bold=True,
+          align=PP_ALIGN.LEFT)
+    return shp(slide, MSO_SHAPE.RECTANGLE, x + 0.04, y + 0.28, w - 0.08, 0.035,
+               fill=color)
+
+
+def down_pentagon(slide, x, y, w, h, *, fill=BLUE):
+    """A pentagon pointing down, fitted to the box (x, y, w, h).
+
+    PowerPoint's pentagon points right, so it is built on its side and rotated
+    about its own centre - which means the pre-rotation box has w and h
+    swapped, or the shape lands outside the slot it was given.
+    """
+    cx, cy = x + w / 2, y + h / 2
+    sh = slide.shapes.add_shape(MSO_SHAPE.PENTAGON, Inches(cx - h / 2),
+                                Inches(cy - w / 2), Inches(h), Inches(w))
+    _flat(sh, fill)
+    sh.rotation = 90
+    sh.text_frame.text = ""
+    return sh
+
+
+def add_mindmap(slide, x, y, w, h, centre, left_items, right_items):
+    """Centre node with labelled branches either side, joined by dashed leads."""
+    col_w = w * 0.30
+    mid_w = w - 2 * col_w - 0.44
+    mid_x = x + col_w + 0.22
+    cx, cy = mid_x + mid_w / 2, y + h / 2
+
+    for items, bx, is_left in ((left_items, x, True),
+                               (right_items, x + w - col_w, False)):
+        n = len(items)
+        slot = h / n
+        anchor_x = mid_x if is_left else mid_x + mid_w
+        for i, (head, subs, colour) in enumerate(items):
+            by = y + i * slot + (slot - 0.94) / 2
+            connect(slide, anchor_x, cy, bx + (col_w if is_left else 0), by + 0.22)
+            shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, bx, by, col_w, 0.42,
+                fill=colour, lines=[head], size=9.5, bold=True)
+            label(slide, bx, by + 0.46, col_w, 0.48,
+                  [("- " + s, 7.5, False) for s in subs], color=MUTED)
+
+    shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, mid_x, cy - 0.46, mid_w, 0.92,
+        fill=NAVY, lines=[(centre[0], 12, True), (centre[1], 8, False)],
+        color=WHITE)
+
+
+def add_arrow_flow(slide, x, y, w, items):
+    """A wide arrow carrying numbered stops, labels alternating above/below."""
+    shaft_h = 0.44
+    ay = y + 0.82
+    shp(slide, MSO_SHAPE.RIGHT_ARROW, x, ay, w, shaft_h, fill=CARD_BG)
+    n = len(items)
+    inner = w - 0.52
+    box_w = min(0.86, inner / n - 0.12)
+    step = (inner - box_w) / max(1, n - 1)
+    for i, (head, detail) in enumerate(items):
+        bx = x + 0.10 + i * step
+        colour = PALETTE[i % len(PALETTE)]
+        shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, bx, ay - 0.09, box_w,
+            shaft_h + 0.18, fill=colour, lines=[str(i + 1)], size=13, bold=True)
+        above = i % 2 == 0
+        cap_w = box_w + 1.04
+        lx = min(max(bx - 0.52, x - 0.04), x + w - cap_w + 0.04)
+        label(slide, lx, (y - 0.06) if above else (ay + 0.50),
+              cap_w, 0.64,
+              [(head, 8.5, True), (detail, 7, False)],
+              color=colour if above else SLATE, spacing=1)
+
+
+def add_chain(slide, x, y, w, h, items):
+    """Interlocking outlines - the reference deck's uniqueness figure."""
+    n = len(items)
+    link_w = (w + (n - 1) * 0.24) / n
+    step = link_w - 0.24
+    for i, (head, detail) in enumerate(items):
+        colour = PALETTE[(i + 2) % len(PALETTE)]
+        lx = x + i * step
+        shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, lx, y, link_w, h,
+            fill=None, line=colour, line_w=4.5)
+        # Inset past the interlock: the links overlap by design, so captions
+        # set to the full link width would sit on each other.
+        label(slide, lx + 0.20, y + h + 0.05, link_w - 0.40, 0.72,
+              [(head, 8, True), (detail, 7, False)], color=colour, spacing=1)
+
+
+def add_shields(slide, x, y, w, items, *, h=1.24):
+    """Pentagon shields in a row - the feasibility dimensions."""
+    n = len(items)
+    gap = 0.11
+    sw = (w - (n - 1) * gap) / n
+    for i, (head, detail) in enumerate(items):
+        colour = PALETTE[i % len(PALETTE)]
+        sx = x + i * (sw + gap)
+        down_pentagon(slide, sx, y, sw, h, fill=colour)
+        label(slide, sx, y + 0.14, sw, 0.86,
+              [(head, 9, True), (detail, 7, False)], color=WHITE, spacing=2)
+
+
+def add_hangers(slide, x, y, w, items):
+    """Boxes suspended from a rail - the reference deck's risk figure."""
+    n = len(items)
+    gap = 0.10
+    bw = (w - (n - 1) * gap) / n
+    for i, (head, detail) in enumerate(items):
+        colour = PALETTE[i % len(PALETTE)]
+        bx = x + i * (bw + gap)
+        connect(slide, bx + bw / 2, y, bx + bw / 2, y + 0.24, color=MUTED,
+                width=1.25, dash=False)
+        shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, bx, y + 0.24, bw, 0.44,
+            fill=colour, lines=[head], size=8.5, bold=True)
+        label(slide, bx, y + 0.72, bw, 0.66, [(detail, 7, False)], color=MUTED)
+
+
+def add_pillars(slide, x, y, w, items):
+    """Cylinders - the mitigations holding those risks up."""
+    n = len(items)
+    gap = 0.11
+    pw = (w - (n - 1) * gap) / n
+    for i, (head, detail) in enumerate(items):
+        colour = PALETTE[i % len(PALETTE)]
+        px = x + i * (pw + gap)
+        shp(slide, MSO_SHAPE.CAN, px + pw * 0.14, y, pw * 0.72, 0.56,
+            fill=colour)
+        label(slide, px, y + 0.60, pw, 0.70,
+              [(head, 8.5, True), (detail, 7, False)], color=colour, spacing=1)
+
+
+def add_hub(slide, cx, cy, centre, items, *, rx=2.55, ry=1.62):
+    """Hub and spokes - who the work lands on."""
+    n = len(items)
+    for i, (head, detail) in enumerate(items):
+        ang = -math.pi / 2 + i * 2 * math.pi / n
+        bx = cx + rx * math.cos(ang) - 0.88
+        by = cy + ry * math.sin(ang) - 0.33
+        colour = PALETTE[i % len(PALETTE)]
+        connect(slide, cx + 0.62 * math.cos(ang), cy + 0.62 * math.sin(ang),
+                bx + 0.88, by + 0.33, color=colour, width=1.25, dash=False)
+        shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, bx, by, 1.76, 0.66,
+            fill=colour, lines=[(head, 9, True), (detail, 7, False)], color=WHITE)
+    shp(slide, MSO_SHAPE.OVAL, cx - 0.70, cy - 0.70, 1.40, 1.40, fill=NAVY,
+        lines=[(centre[0], 10.5, True), (centre[1], 7.5, False)], color=WHITE)
+
+
+def add_ring(slide, cx, cy, items, *, r=0.92):
+    """A ring with claims set around it.
+
+    Built from a donut plus a marker per claim rather than from pie wedges:
+    wedge geometry is driven by shape adjustments whose units differ between
+    renderers, and a deck that only lays out correctly in one viewer is not
+    worth the extra colour.
+    """
+    shp(slide, MSO_SHAPE.DONUT, cx - r, cy - r, 2 * r, 2 * r, fill=CARD_BG)
+    n = len(items)
+    for i, (head, detail) in enumerate(items):
+        ang = -math.pi / 2 + i * 2 * math.pi / n
+        colour = PALETTE[i % len(PALETTE)]
+        mx = cx + r * 0.86 * math.cos(ang)
+        my = cy + r * 0.86 * math.sin(ang)
+        shp(slide, MSO_SHAPE.OVAL, mx - 0.15, my - 0.15, 0.30, 0.30,
+            fill=colour, lines=[str(i + 1)], size=8, bold=True)
+        lx = cx + (r + 1.34) * math.cos(ang) - 0.94
+        ly = cy + (r + 0.78) * math.sin(ang) - 0.30
+        label(slide, lx, ly, 1.88, 0.62,
+              [(head, 8.5, True), (detail, 7, False)], color=colour, spacing=1)
+
+
+def add_stack_table(slide, x, y, w, rows, *, row_h=0.40, gap=0.055):
+    """The reference deck's tech-stack grid: coloured label, plain value."""
+    lab_w = w * 0.44
+    for i, (head, value) in enumerate(rows):
+        colour = PALETTE[i % len(PALETTE)]
+        ry = y + i * (row_h + gap)
+        shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, x, ry, lab_w, row_h,
+            fill=colour, lines=[head], size=8.5, bold=True, align=PP_ALIGN.LEFT)
+        shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, x + lab_w + 0.07, ry,
+            w - lab_w - 0.07, row_h, fill=CARD_BG, lines=[value], size=8.5,
+            color=SLATE, align=PP_ALIGN.LEFT)
+
+
+def add_stack_layers(slide, x, y, w, layers, *, band_h=0.50, arrow_h=0.15):
+    """A stacked architecture figure: layer bands joined by down arrows."""
+    cy = y
+    for i, (head, detail, colour) in enumerate(layers):
+        shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, x, cy, w, band_h, fill=colour,
+            lines=[(head + "   ", 9.5, True), (detail, 7.5, False)], color=WHITE)
+        cy += band_h
+        if i < len(layers) - 1:
+            shp(slide, MSO_SHAPE.DOWN_ARROW, x + w / 2 - 0.10, cy + 0.015,
+                0.20, arrow_h - 0.03, fill=CARD_LINE)
+            cy += arrow_h
+    return cy
+
+
+def add_notes(slide, x, y, w, items, *, h=0.72):
+    """Folded-corner notes - the reference deck's team/reference strip."""
+    n = len(items)
+    gap = 0.10
+    nw = (w - (n - 1) * gap) / n
+    for i, text in enumerate(items):
+        colour = PALETTE[i % len(PALETTE)]
+        shp(slide, MSO_SHAPE.FOLDED_CORNER, x + i * (nw + gap), y, nw, h,
+            fill=colour, lines=[text], size=8, bold=True)
+
+
+# --------------------------------------------------------------------------
 # Slide builders
 # --------------------------------------------------------------------------
 
@@ -343,297 +638,274 @@ def build_idea(slide) -> None:
     set_title(slide, "PREDICTIVE CYBER DEFENCE")
     clear(find(slide, "TextBox 8"))
 
-    add_band(slide, LEFT, TOP, WIDTH, 0.62,
-             "We do not classify traffic — we learn how a network's state "
+    add_band(slide, LEFT, TOP, WIDTH, 0.48,
+             "We do not classify traffic - we learn how a network's state "
              "evolves, then run that model forward to see where a host is heading.",
-             size=13.5)
+             size=12.5)
 
-    col_w, gap = 3.95, 0.25
-    y, h = TOP + 0.80, 3.62
-    add_card(slide, LEFT, y, col_w, h,
-             "Proposed Solution",
-             [
-                 "Traffic → 60-second windows; each becomes a 39-feature "
-                 "snapshot of one host",
-                 "A world model learns the transition: what state usually "
-                 "follows this state",
-                 "Stop feeding it traffic — it generates the next 10 states "
-                 "on its own",
-                 "Each imagined state is scored: infiltration risk + MITRE "
-                 "ATT&CK stage",
-             ], accent=BLUE)
+    lw = 5.90
+    rx = LEFT + lw + 0.55
+    rw = RIGHT - rx
 
-    add_card(slide, LEFT + col_w + gap, y, col_w, h,
-             "How It Addresses the Problem",
-             [
-                 "Answers “where is this host heading”, not “was "
-                 "that flow bad”",
-                 "10-minute lookahead — acts before the kill chain closes",
-                 "Flow-level and packet-level features together: TTL variance, "
-                 "TCP window, retransmissions, scan signatures",
-                 "Every alert carries three explanations — no black box",
-             ], accent=NAVY)
+    # ---- left: what the system is made of -------------------------------
+    section(slide, LEFT, TOP + 0.60, lw, "AttackForecast - what it is made of")
+    add_mindmap(
+        slide, LEFT, TOP + 1.02, lw, 3.86,
+        ("AttackForecast", "RSSM world model  -  138k parameters"),
+        [
+            ("Flow features", ["39 per 60-second window",
+                               "bytes, ports, entropy"], BLUE),
+            ("Packet features", ["23 from raw PCAP",
+                                 "TTL variance, TCP window"], TEAL),
+            ("World model", ["encoder + GRU + prior",
+                             "learns state transitions"], ORANGE),
+        ],
+        [
+            ("Forecasting", ["10 states imagined ahead",
+                             "uncertainty band"], PURPLE),
+            ("ATT&CK mapping", ["5 kill-chain stages",
+                                "technique IDs attached"], GREEN),
+            ("Explainability", ["integrated gradients",
+                                "temporal attention"], PINK),
+        ],
+    )
 
-    add_card(slide, LEFT + 2 * (col_w + gap), y, col_w, h,
-             "Innovation and Uniqueness",
-             [
-                 "World model, not a classifier — the heads read the latent "
-                 "state, so they still work on imagined states",
-                 "Provable: an imagination-only loss yields zero encoder "
-                 "gradient (asserted in our test suite)",
-                 "ATT&CK stages derived from CTU-13's own flow annotations, not "
-                 "hand-waved",
-                 "Runs fully offline on CPU — 138k parameters",
-             ], accent=GREEN)
+    # ---- right: how it answers the problem, and what is new -------------
+    section(slide, rx, TOP + 0.60, rw, "How it addresses the problem")
+    add_arrow_flow(slide, rx, TOP + 1.10, rw, [
+        ("Observe", "60-second host windows"),
+        ("Learn transitions", "what state follows this state"),
+        ("Cut the traffic off", "model sees nothing more"),
+        ("Imagine 10 steps", "it generates the future itself"),
+        ("Score each state", "risk + ATT&CK stage"),
+    ])
 
-    add_band(slide, LEFT, y + h + 0.20, WIDTH, 0.56,
-             "Working prototype today  •  258,229 network states from all 13 CTU-13 "
-             "captures  •  28 of 30 infected hosts flagged at 4.9% false alarms "
-             "•  transfers to unseen malware families  •  runs offline on CPU",
-             fill=GREEN, size=12)
+    section(slide, rx, TOP + 3.20, rw, "Innovation and uniqueness")
+    add_chain(slide, rx, TOP + 3.63, rw, 0.50, [
+        ("World model, not a classifier",
+         "heads read the latent state, so they work on imagined "
+         "states"),
+        ("Falsifiable by construction",
+         "imagination-only loss gives zero encoder gradient - "
+         "in our tests"),
+        ("Runs offline on a CPU",
+         "no cloud, no GPU, no external API - air-gap ready for "
+         "CII networks"),
+    ])
+
+    add_band(slide, LEFT, BOTTOM - 0.42, WIDTH, 0.42,
+             "Working prototype today  -  258,229 network states from all 13 "
+             "CTU-13 captures  -  28 of 30 infected hosts flagged at 4.9% "
+             "false alarms",
+             fill=GREEN, size=11)
 
 
 def build_technical(slide) -> None:
     clear(find(slide, "TextBox 8"))
 
-    steps = [
-        ("Ingest", "NetFlow / PCAP\n(Scapy)"),
-        ("Feature extraction", "39 flow + 23 packet\nfeatures"),
-        ("Network state", "60-second\n(host, window) cells"),
-        ("World model", "Encoder → GRU →\nprior / posterior"),
-        ("Forward simulation", "10 imagined states\n+ uncertainty band"),
-        ("Decision support", "Risk • ATT&CK stage\n• explanations"),
-    ]
-    n = len(steps)
-    arrow_w, gap = 0.22, 0.07
-    box_w = (WIDTH - (n - 1) * (arrow_w + 2 * gap)) / n
-    y, h = TOP + 0.04, 0.95
-    x = LEFT
-    for i, (head, detail) in enumerate(steps):
-        fill = NAVY if i in (3, 4) else BLUE
-        add_step(slide, x, y, box_w, h, head, detail, fill=fill)
-        x += box_w
-        if i < n - 1:
-            add_arrow(slide, x + gap, y + h / 2 - 0.11, arrow_w, 0.22)
-            x += arrow_w + 2 * gap
+    lw = 7.05
+    rx = LEFT + lw + 0.55
+    rw = RIGHT - rx
 
-    cy, ch = y + h + 0.24, 3.35
-    col_w, cgap = 4.0, 0.22
-    add_card(slide, LEFT, cy, col_w, ch,
-             "Technologies Used",
-             [
-                 "Python 3.13, PyTorch (CPU-only)",
-                 "Scapy — raw PCAP parsing, flow reconstruction",
-                 "pandas / NumPy — vectorised feature pipeline",
-                 "scikit-learn — baselines and metrics",
-                 "FastAPI + zero-dependency HTML dashboard",
-                 "100% open source • no cloud, no external API",
-             ], accent=BLUE)
+    section(slide, LEFT, TOP, lw, "Architecture - traffic in, forecast out")
+    add_stack_layers(slide, LEFT + 0.30, TOP + 0.50, lw - 0.60, [
+        ("INGEST", "NetFlow / .binetflow  -  raw PCAP via Scapy", NAVY),
+        ("FEATURE EXTRACTION", "39 flow features  +  23 packet features", BLUE),
+        ("NETWORK STATE", "one cell per (host, 60-second window)", TEAL),
+        ("ENCODER + GRU", "latent state carrying the host's history", ORANGE),
+        ("PRIOR ROLLOUT", "10 states imagined with no traffic observed", PURPLE),
+        ("PREDICTION HEADS", "infiltration risk  -  ATT&CK stage  -  surprise", PINK),
+        ("DECISION SUPPORT", "dashboard, replay, three explanation channels", GREEN),
+    ])
 
-    add_card(slide, LEFT + col_w + cgap, cy, col_w, ch,
-             "Model — Recurrent State-Space",
-             [
-                 "Encoder compresses each window into a latent state",
-                 "GRU carries context; a prior predicts the next latent "
-                 "without seeing traffic",
-                 "Decoder reconstructs traffic, so the latent must encode "
-                 "real network state",
-                 "Trained on its own rollouts, so multi-step forecasting is "
-                 "learned, not hoped for",
-                 "Causal attention — masked so no step sees its future",
-             ], accent=NAVY)
+    section(slide, rx, TOP, rw, "Tech stack used")
+    add_stack_table(slide, rx, TOP + 0.50, rw, [
+        ("Language", "Python 3.13"),
+        ("Deep learning", "PyTorch (CPU-only)"),
+        ("Packet parsing", "Scapy - raw PCAP, flow rebuild"),
+        ("Data pipeline", "pandas + NumPy, vectorised"),
+        ("Baselines & metrics", "scikit-learn"),
+        ("Backend", "FastAPI + Uvicorn"),
+        ("Frontend", "Single-file HTML, zero CDN"),
+        ("Explainability", "Integrated Gradients + attention"),
+        ("Dataset", "CTU-13 - 13 real captures, CC BY"),
+        ("Deployment", "Fully offline, no external API"),
+    ])
 
-    add_card(slide, LEFT + 2 * (col_w + cgap), cy, col_w, ch,
-             "Methodology and Validation",
-             [
-                 "Dataset: CTU-13 (13 real botnet captures, CC BY)",
-                 "Split by time, never randomly — train on each capture's "
-                 "past, test on its future, with a guard band",
-                 "Baselines given identical features, scaler and labels",
-                 "Deterministic inference + seeded rollouts — the benchmark "
-                 "reproduces byte for byte",
-                 "Test suites for model shapes and PCAP header parsing",
-             ], accent=GREEN)
-
-    add_band(slide, LEFT, cy + ch + 0.16, WIDTH, 0.44,
-             "Offline dashboard: minute-by-minute replay of the forecast  •  "
-             "kill-chain timeline  •  network topology  •  three explanation "
-             "channels per prediction",
-             fill=RED, size=11.5)
+    add_band(slide, LEFT, BOTTOM - 0.44, WIDTH, 0.44,
+             "Validation: split by time, never randomly  -  baselines given "
+             "identical features, scaler and labels  -  seeded rollouts, so the "
+             "benchmark reproduces byte for byte",
+             fill=RED, size=11)
 
 
 def build_feasibility(slide, images_dir: Path) -> None:
     clear(find(slide, "TextBox 8"))
 
-    left_w = 6.15
-    right_x = LEFT + left_w + 0.35
-    right_w = RIGHT - right_x
+    lw = 6.00
+    rx = LEFT + lw + 0.40
+    rw = RIGHT - rx
 
-    add_band(slide, LEFT, TOP, left_w, 0.44,
-             "Feasibility — where the model actually wins", fill=NAVY, size=12.5)
+    # ---- left: is it deployable, and does it actually run ---------------
+    section(slide, LEFT, TOP, lw, "Feasibility of AttackForecast")
+    add_shields(slide, LEFT, TOP + 0.48, lw, [
+        ("Technical", "CPU-only, 138k params"),
+        ("Financial", "zero licence cost"),
+        ("Operational", "consumes NetFlow already exported"),
+        ("Legal", "data never leaves the network"),
+        ("Social", "analyst keeps the decision"),
+    ])
 
-    add_table(slide, LEFT, TOP + 0.54, left_w, 1.60,
-              [
-                  ["Stage forecast, macro-F1 by horizon", "+2", "+4", "+10"],
-                  ["World model (ours)", "0.583", "0.642", "0.524"],
-                  ["“assume nothing changes” baseline", "0.473", "0.474", "0.436"],
-                  ["Detection F1: 0.979 vs 0.977 — a tie", "", "", ""],
-              ],
-              col_widths=[2.85, 1.10, 1.10, 1.10], highlight_row=1, size=10)
-
-    add_card(slide, LEFT, TOP + 2.24, left_w, 3.12,
-             "Why it is deployable",
-             [
-                 "Runs on a laptop CPU — no GPU, no cloud, no licence cost",
-                 "Consumes NetFlow/IPFIX that enterprises already export",
-                 "Sub-second triage of a full capture after first load",
-                 "Fully offline — suitable for air-gapped Critical "
-                 "Information Infrastructure",
-                 "MITRE stage macro-F1 0.537 vs 0.453 for the baseline",
-                 "Transfers to unseen malware families — trained on Neris and "
-                 "Rbot, F1 0.874 and ROC-AUC 0.982 on Virut and Murlo",
-                 "Replay reconstructs what the model knew at every minute, so "
-                 "an analyst can audit a decision after the fact",
-             ], accent=BLUE, size=10)
-
-    # One header only. An earlier revision stacked a band above this card and
-    # the slide came out with two red bars saying the same thing.
-    add_card(slide, right_x, TOP, right_w, 2.70,
-             "Potential Challenges and Risks  →  Our Mitigation",
-             [
-                 ("Label leak through metadata", 2),
-                 ("The available PCAP held only botnet traffic, so a “packet "
-                  "data present” flag became a perfect label proxy → detected "
-                  "it, removed it; F1 rose 0.23 → 0.98", 1),
-                 ("Detection is no better than logistic regression", 2),
-                 ("0.979 vs 0.977. An earlier 0.984-vs-0.744 gap was an "
-                  "artefact of a test split whose positives came from one "
-                  "host → the model earns its place on forecasting, not "
-                  "detection", 1),
-                 ("Short-burst compromise", 2),
-                 ("The risk head needs sustained activity → the unsupervised "
-                  "surprise channel covers that gap; triage flags on either, "
-                  "catching 28 of 30 hosts at 4.9% false alarms", 1),
-                 ("Stage forecasting does not cross families", 2),
-                 ("Detection transfers to unseen malware, progression does "
-                  "not — reported, not hidden", 1),
-             ], accent=RED, size=9.5)
-
-    # A screenshot from the running prototype. The deck is read without the
-    # demo in the room, so one frame of real output does more for credibility
-    # than another paragraph claiming the thing works. The kill-chain strip is
-    # the right pick: a ~20:1 aspect fits a full-width band, and the blue-to-red
-    # break is the reconnaissance-to-exfiltration transition we forecast.
-    # A screenshot from the running prototype, sized to actually be recognised
-    # as one. The first attempt used the kill-chain strip: correct content, but
-    # a 34:1 sliver at the foot of the slide that reads as a decorative rule
-    # rather than as evidence the software exists. The topology view survives
-    # being small - the red starburst is legible at a glance.
-    shot = images_dir / "topology-wide.png"
-    y = TOP + 2.80
-    add_band(slide, right_x, y, right_w, 0.28,
-             "Live output — the compromised host and its malicious fan-out",
-             fill=GREEN, size=10)
+    section(slide, LEFT, TOP + 1.92, lw, "Live output from the running prototype")
+    shot = images_dir / "g-topology.png"
     if shot.exists():
-        # Height from the crop's own aspect so the screenshot is never
-        # stretched; a squashed screenshot looks exactly like one.
         with Image.open(shot) as img:
             aspect = img.width / img.height
+        # Sized from the space left above the footer, then from the crop's
+        # own aspect - a squashed screenshot looks exactly like one.
+        top = TOP + 2.38
+        sh_h = min(BOTTOM - 0.34 - top, 3.95 / aspect)
+        sw = sh_h * aspect
         slide.shapes.add_picture(
-            str(shot), Inches(right_x), Inches(y + 0.35),
-            width=Inches(right_w), height=Inches(right_w / aspect),
+            str(shot), Inches(LEFT + (lw - sw) / 2), Inches(top),
+            width=Inches(sw), height=Inches(sh_h),
         )
+        label(slide, LEFT, top + sh_h + 0.04, lw, 0.28,
+              ["3D topology - the compromised host and its malicious fan-out"],
+              size=8, color=MUTED)
     else:
         print(f"  warning: {shot.name} missing, slide 4 screenshot skipped",
               file=sys.stderr)
+
+    # ---- right: what could go wrong, and what we did about it -----------
+    section(slide, rx, TOP, rw, "Potential challenges and risks", color=RED)
+    add_hangers(slide, rx, TOP + 0.48, rw, [
+        ("Label leak", "a metadata flag became a perfect label proxy"),
+        ("Detection is only a tie", "0.979 against 0.977 for logistic regression"),
+        ("Short-burst compromise", "the risk head needs sustained activity"),
+        ("Stages do not cross families", "progression did not transfer"),
+    ])
+
+    section(slide, rx, TOP + 1.96, rw, "Strategies for overcoming these", color=GREEN)
+    add_pillars(slide, rx, TOP + 2.44, rw, [
+        ("Found and removed", "caught in our own audit; F1 0.23 to 0.98"),
+        ("Compete on forecasting", "beats persistence at 9 of 10 horizons"),
+        ("Second channel", "unsupervised surprise covers the gap"),
+        ("Reported, not hidden", "detection transfers; progression does not"),
+    ])
+
+    add_band(slide, rx, BOTTOM - 1.02, rw, 0.44,
+             "Stage forecast macro-F1 by horizon", fill=NAVY, size=10.5)
+    add_table(slide, rx, BOTTOM - 0.56, rw, 0.56,
+              [
+                  ["Horizon", "+2", "+4", "+6", "+10"],
+                  ["World model (ours)", "0.583", "0.642", "0.624", "0.524"],
+                  ["“nothing changes” baseline", "0.473", "0.474",
+                   "0.455", "0.436"],
+              ],
+              col_widths=[2.20, 0.96, 0.96, 0.96, 0.96], highlight_row=1, size=9)
 
 
 def build_impact(slide) -> None:
     clear(find(slide, "TextBox 8"))
 
-    add_band(slide, LEFT, TOP, WIDTH, 0.56,
+    add_band(slide, LEFT, TOP, WIDTH, 0.46,
              "Shifting the defender from reacting after compromise to acting "
-             "during the kill chain", size=13.5)
+             "during the kill chain", size=12.5)
 
-    col_w, gap = 3.95, 0.25
-    y, h = TOP + 0.72, 3.52
+    lw = 6.00
+    rx = LEFT + lw + 0.40
+    rw = RIGHT - rx
 
-    add_card(slide, LEFT, y, col_w, h,
-             "Who Benefits",
-             [
-                 "SOC analysts — a ranked queue instead of an alert flood",
-                 "Critical Information Infrastructure: power, banking, "
-                 "telecom, transport",
-                 "CERT-In and national response teams",
-                 "Enterprises already exporting NetFlow, with no new hardware "
-                 "to buy",
-             ], accent=BLUE)
+    section(slide, LEFT, TOP + 0.58, lw, "Potential impact on the target audience")
+    add_hub(slide, LEFT + lw / 2, TOP + 3.00,
+            ("AttackForecast", "10 minutes of warning"),
+            [
+                ("SOC analysts", "a ranked queue, not an alert flood"),
+                ("Critical infrastructure", "power, banking, telecom, transport"),
+                ("CERT-In", "national response teams"),
+                ("Enterprises", "no new hardware to buy"),
+                ("Auditors", "every alert is challengeable"),
+            ], rx=2.10, ry=1.52)
 
-    add_card(slide, LEFT + col_w + gap, y, col_w, h,
-             "Operational Benefits",
-             [
-                 "Up to 10 minutes of warning before the kill chain closes",
-                 "False positive rate 0.000 on the held-out period — "
-                 "analyst time is not wasted",
-                 "Replay lets an analyst rewind an incident minute by minute "
-                 "and see what the model knew, when",
-                 "Explanations make alerts auditable and challengeable",
-                 "ATT&CK stage names map onto existing playbooks",
-             ], accent=NAVY)
+    section(slide, rx, TOP + 0.58, rw, "Benefits of AttackForecast")
+    add_ring(slide, rx + rw / 2, TOP + 3.00, [
+        ("Early warning", "up to 10 minutes before the chain closes"),
+        ("Low noise", "4.9% false alarms across 13 captures"),
+        ("Auditable", "replay shows what the model knew, minute by minute"),
+        ("Air-gap ready", "nothing leaves the network"),
+        ("Zero licence cost", "open source, runs on existing hardware"),
+        ("Playbook-ready", "ATT&CK stage names map onto what SOCs already use"),
+    ])
 
-    add_card(slide, LEFT + 2 * (col_w + gap), y, col_w, h,
-             "Strategic and Economic",
-             [
-                 "Fully indigenous, open-source — no foreign vendor "
-                 "dependency for national infrastructure",
-                 "Zero licence cost; runs on existing hardware",
-                 "Air-gap friendly — nothing leaves the network",
-                 "Earlier detection cuts breach cost, downtime and data loss",
-             ], accent=GREEN)
-
-    add_band(slide, LEFT, y + h + 0.20, WIDTH, 0.56,
-             "Every claim on this deck is reproducible from the repository: "
-             "one command prepares the data, one trains, one benchmarks.",
-             fill=GREEN, size=12.5)
+    add_band(slide, LEFT, BOTTOM - 0.44, WIDTH, 0.44,
+             "Every claim on this deck is reproducible from the repository: one "
+             "command prepares the data, one trains, one benchmarks.",
+             fill=GREEN, size=11.5)
 
 
 def build_references(slide) -> None:
     clear(find(slide, "TextBox 8"))
 
-    col_w, gap = 6.15, 0.55
-    y, h = TOP, 5.34
+    section(slide, LEFT, TOP, WIDTH, "Datasets, standards and prior work")
 
-    add_card(slide, LEFT, y, col_w, h,
-             "Datasets and Knowledge Bases",
-             [
-                 ("CTU-13 Dataset — Stratosphere IPS, CTU Prague", 2),
-                 ("García et al., “An empirical comparison of botnet "
-                  "detection methods”, Computers & Security, 2014", 1),
-                 ("mcfp.felk.cvut.cz/publicDatasets/CTU-13-Dataset/", 1),
-                 ("MITRE ATT&CK Enterprise Matrix", 2),
-                 ("Tactics TA0043, TA0001, TA0008, TA0011, TA0010", 1),
-                 ("attack.mitre.org", 1),
-                 ("CIC-IDS2017 / CSE-CIC-IDS2018 — UNB", 2),
-                 ("Reviewed; access now gated behind registration", 1),
-                 ("NCIIPC — nciipc.gov.in", 2),
-             ], accent=BLUE, size=10.5)
+    cols = [
+        ("CTU-13 Dataset",
+         ["Stratosphere IPS, CTU Prague",
+          "13 real botnet captures, CC BY",
+          "Garcia et al., Computers &",
+          "Security, 2014"]),
+        ("MITRE ATT&CK",
+         ["Enterprise Matrix",
+          "TA0043 Reconnaissance",
+          "TA0001 / TA0008 / TA0011",
+          "TA0010 Exfiltration"]),
+        ("World models",
+         ["Ha & Schmidhuber,",
+          "World Models, NeurIPS 2018",
+          "Hafner et al., PlaNet, ICML 2019",
+          "Hafner et al., Dreamer, ICLR 2020"]),
+        ("Explainability",
+         ["Sundararajan et al.,",
+          "Integrated Gradients, ICML 2017",
+          "Vaswani et al., Attention Is",
+          "All You Need, NeurIPS 2017"]),
+        ("National context",
+         ["NCIIPC - nciipc.gov.in",
+          "CIC-IDS2017 / CSE-CIC-IDS2018",
+          "reviewed; access now gated",
+          "behind registration"]),
+    ]
+    n = len(cols)
+    gap = 0.16
+    cw = (WIDTH - (n - 1) * gap) / n
+    for i, (head, body) in enumerate(cols):
+        colour = PALETTE[i % len(PALETTE)]
+        cx = LEFT + i * (cw + gap)
+        shp(slide, MSO_SHAPE.OVAL, cx + cw / 2 - 0.24, TOP + 0.50, 0.48, 0.48,
+            fill=colour, lines=[str(i + 1)], size=13, bold=True)
+        connect(slide, cx + cw / 2, TOP + 0.98, cx + cw / 2, TOP + 1.16,
+                color=colour, width=1.5, dash=False)
+        down_pentagon(slide, cx, TOP + 1.16, cw, 1.98, fill=colour)
+        label(slide, cx + 0.10, TOP + 1.30, cw - 0.20, 1.50,
+              [(head, 10, True)] + [(b, 7.5, False) for b in body],
+              color=WHITE, spacing=2)
 
-    add_card(slide, LEFT + col_w + gap, y, col_w, h,
-             "Methods and Literature",
-             [
-                 ("World models / latent dynamics", 2),
-                 ("Ha & Schmidhuber, “World Models”, NeurIPS 2018", 1),
-                 ("Hafner et al., “Learning Latent Dynamics for Planning "
-                  "from Pixels” (PlaNet/RSSM), ICML 2019", 1),
-                 ("Hafner et al., “Dream to Control” (Dreamer), ICLR 2020", 1),
-                 ("Explainability", 2),
-                 ("Sundararajan et al., “Axiomatic Attribution for Deep "
-                  "Networks” (Integrated Gradients), ICML 2017", 1),
-                 ("Vaswani et al., “Attention Is All You Need”, "
-                  "NeurIPS 2017", 1),
-                 ("Tools", 2),
-                 ("Scapy • PyTorch • scikit-learn • FastAPI", 1),
-             ], accent=NAVY, size=10.5)
+    section(slide, LEFT, TOP + 3.44, WIDTH, "Built with")
+    add_notes(slide, LEFT, TOP + 3.92, WIDTH, [
+        "Python 3.13", "PyTorch", "Scapy", "pandas + NumPy",
+        "scikit-learn", "FastAPI", "Integrated Gradients",
+    ], h=0.68)
+
+    add_band(slide, LEFT, BOTTOM - 0.92, WIDTH, 0.44,
+             "Problem Statement 26153 (NTRO)  -  AI based Network Attack "
+             "Forecasting from Network Traffic Data  -  "
+             "Blockchain & Cybersecurity",
+             fill=NAVY, size=11)
+    add_band(slide, LEFT, BOTTOM - 0.44, WIDTH, 0.44,
+             "Source, data preparation and benchmark: "
+             "github.com/HowSuyash/AttackForecast",
+             fill=GREEN, size=11)
 
 
 # --------------------------------------------------------------------------
