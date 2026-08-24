@@ -137,6 +137,26 @@ select,.btn{width:100%;background:var(--panel-2);color:var(--txt);
 .stage.now .badge{background:var(--accent);color:#fff}
 .stage.pred .badge{background:var(--danger);color:#fff}
 
+/* ---------- topology selection panel ---------- */
+.ginfo{margin-top:12px;padding:11px 13px;background:var(--panel-2);
+       border:1px solid var(--line);border-radius:8px;font-size:12px;min-height:44px}
+.ginfo .dim{color:var(--txt-faint)}
+.sel-head{display:flex;align-items:center;gap:9px}
+.sel-ip{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--txt)}
+.sel-head .q{margin-left:auto}
+.sel-meta{color:var(--txt-dim);font-size:11.5px;margin-top:4px}
+/* The peer list is the answer to "connected to what?", so it is a scrollable
+   column rather than a truncated sentence. */
+.sel-peers{margin-top:9px;max-height:150px;overflow-y:auto;
+           display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:3px}
+.peer{display:flex;justify-content:space-between;gap:8px;padding:3px 7px;
+      background:var(--panel);border-radius:4px;font-size:11px}
+.peer .ip{font-family:var(--mono);color:var(--txt-dim)}
+.peer .n{font-family:var(--mono);color:var(--txt-faint)}
+.peer.mal{background:var(--danger-wash)}
+.peer.mal .ip{color:var(--danger);font-weight:600}
+.peer.dim{background:none;color:var(--txt-faint);justify-content:flex-start}
+
 /* ---------- charts ---------- */
 canvas{display:block;width:100%}
 .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--txt-dim)}
@@ -526,6 +546,66 @@ function layoutGraph3D(data){
   return {P, E, nodes};
 }
 
+// View state for the topology scene. Kept outside drawGraph so a pointer event
+// can nudge the camera without rebuilding the layout, which is the expensive
+// part.
+let GV = null;
+
+function graphNeighbours(state, i){
+  const peers = new Map();
+  state.E.forEach(e=>{
+    if(e.s === i) peers.set(e.t, e);
+    else if(e.t === i) peers.set(e.s, e);
+  });
+  return peers;
+}
+
+function renderGraphInfo(state){
+  const box = $("#graphInfo");
+  if(!box) return;
+  if(state.sel == null){
+    box.innerHTML = `<span class="dim">Click any node to isolate it and list what
+      it talks to. Scroll to zoom, drag to turn the scene, double-click to reset.</span>`;
+    return;
+  }
+  const n = state.nodes[state.sel];
+  const peers = [...graphNeighbours(state, state.sel).entries()]
+    .map(([j, e]) => ({node: state.nodes[j], edge: e}))
+    .sort((a,b) => (b.edge.m - a.edge.m) || (b.node.flows - a.node.flows));
+
+  const mal = peers.filter(x => x.edge.m).length;
+  const sev = nodeSeverity(n);
+  const badge = sev === "risk"
+      ? `<span class="why r">risk ${fmtPct(n.risk || 0)}</span>`
+      : sev === "anomaly"
+        ? `<span class="why a">anomaly ${(n.surprise_z||0).toFixed(1)}&sigma;</span>`
+        : "";
+
+  box.innerHTML = `
+    <div class="sel-head">
+      <span class="sel-ip">${n.id}</span> ${badge}
+      <button class="q" id="graphClear" title="Clear selection">&times;</button>
+    </div>
+    <div class="sel-meta">
+      ${n.monitored ? "monitored host" : "external peer"}
+      &middot; ${Math.round(n.flows).toLocaleString()} flows
+      ${n.stage ? "&middot; " + n.stage : ""}
+      &middot; ${peers.length} connection${peers.length===1?"":"s"}
+      ${mal ? `&middot; <strong style="color:var(--danger)">${mal} malicious</strong>` : ""}
+    </div>
+    <div class="sel-peers">
+      ${peers.slice(0, 40).map(x => `
+        <div class="peer ${x.edge.m ? "mal" : ""}">
+          <span class="ip">${x.node.id}</span>
+          <span class="n">${x.edge.flows.toLocaleString()}</span>
+        </div>`).join("")}
+      ${peers.length > 40 ? `<div class="peer dim">and ${peers.length-40} more</div>` : ""}
+    </div>`;
+
+  const clear = $("#graphClear");
+  if(clear) clear.onclick = () => { state.sel = null; renderGraphInfo(state); };
+}
+
 function drawGraph(cv, data, height, _t){
   const _c = setupCanvas(cv, height);
   if(!_c){ retryDraw(t=>drawGraph(cv,data,height,t), _t); return; }
@@ -538,83 +618,148 @@ function drawGraph(cv, data, height, _t){
     g.textAlign="center"; g.fillText("No topology to draw.", w/2, h/2); return;
   }
 
-  const {P, E, nodes} = layoutGraph3D(data);
-  const FOCAL = 620;                      // perspective strength
-  let angle = -0.35;
+  const laid = layoutGraph3D(data);
+  const state = GV = {
+    P: laid.P, E: laid.E, nodes: laid.nodes, cv, w, h,
+    zoom: 1, ax: -0.25, ay: -0.35, spin: true,
+    sel: null, proj: [], drag: null,
+  };
+  const FOCAL = 620;
 
-  function frame(){
-    const cos = Math.cos(angle), sin = Math.sin(angle);
-    // Rotate about Y, then project. Depth decides draw order, size and alpha,
-    // which is what makes the scene read as 3D on a flat canvas.
-    const proj = P.map((p,i)=>{
-      const x =  p.x*cos + p.z*sin;
-      const z = -p.x*sin + p.z*cos;
-      const s = FOCAL / (FOCAL + z + 260);
-      return { sx: w/2 + x*s, sy: h/2 + p.y*s, s, z, i };
+  // --- interaction --------------------------------------------------------
+  // Auto-rotation stops the moment the viewer takes control; spinning under
+  // someone's cursor while they try to read a label is worse than static.
+  const pos = ev => {
+    const r = cv.getBoundingClientRect();
+    return {x: ev.clientX - r.left, y: ev.clientY - r.top};
+  };
+
+  cv.onwheel = ev => {
+    ev.preventDefault();
+    state.zoom = Math.min(6, Math.max(0.4, state.zoom * (ev.deltaY < 0 ? 1.12 : 0.89)));
+  };
+  cv.onpointerdown = ev => {
+    cv.setPointerCapture(ev.pointerId);
+    state.drag = {x: pos(ev).x, y: pos(ev).y, ax: state.ax, ay: state.ay, moved: 0};
+    state.spin = false;
+  };
+  cv.onpointermove = ev => {
+    if(!state.drag) return;
+    const q = pos(ev);
+    const dx = q.x - state.drag.x, dy = q.y - state.drag.y;
+    state.drag.moved = Math.max(state.drag.moved, Math.hypot(dx, dy));
+    state.ay = state.drag.ay + dx * 0.006;
+    state.ax = Math.max(-1.2, Math.min(1.2, state.drag.ax + dy * 0.006));
+  };
+  cv.onpointerup = ev => {
+    const wasDrag = state.drag && state.drag.moved > 4;
+    state.drag = null;
+    if(wasDrag) return;                   // a drag is a camera move, not a pick
+    const q = pos(ev);
+    let best = null, bestD = 18;
+    state.proj.forEach(pt => {
+      const d = Math.hypot(pt.sx - q.x, pt.sy - q.y);
+      if(d < bestD){ bestD = d; best = pt.i; }
     });
+    state.sel = (best != null && best === state.sel) ? null : best;
+    renderGraphInfo(state);
+  };
+  cv.ondblclick = () => {
+    state.zoom = 1; state.ax = -0.25; state.ay = -0.35; state.spin = true;
+    state.sel = null; renderGraphInfo(state);
+  };
+  cv.style.cursor = "grab";
+  renderGraphInfo(state);
+
+  // --- render -------------------------------------------------------------
+  function frame(){
+    const cy = Math.cos(state.ay), sy = Math.sin(state.ay);
+    const cx = Math.cos(state.ax), sx = Math.sin(state.ax);
+
+    state.proj = state.P.map((p,i)=>{
+      let x =  p.x*cy + p.z*sy;
+      let z = -p.x*sy + p.z*cy;
+      const y = p.y*cx - z*sx;
+      z = p.y*sx + z*cx;
+      const s = (FOCAL / (FOCAL + z + 260)) * state.zoom;
+      return { sx: w/2 + x*s, sy: h/2 + y*s, s, z, i };
+    });
+
+    const sel = state.sel;
+    const near = sel != null ? graphNeighbours(state, sel) : null;
+    const lit = j => sel == null || j === sel || near.has(j);
 
     g.clearRect(0,0,w,h);
 
-    // Edges first, far to near.
-    E.map(e=>({e, z:(proj[e.s].z + proj[e.t].z)/2}))
-     .sort((a,b)=>b.z-a.z)
-     .forEach(({e})=>{
-        const a=proj[e.s], b=proj[e.t];
+    state.E.map(e=>({e, z:(state.proj[e.s].z + state.proj[e.t].z)/2}))
+      .sort((a,b)=>b.z-a.z)
+      .forEach(({e})=>{
+        const a=state.proj[e.s], b=state.proj[e.t];
         const depth = Math.min(a.s, b.s);
+        // With a node selected everything unrelated fades, so one host's
+        // neighbourhood stays readable inside a graph of ninety.
+        const on = sel == null || e.s === sel || e.t === sel;
         g.beginPath(); g.moveTo(a.sx,a.sy); g.lineTo(b.sx,b.sy);
         g.strokeStyle = e.m ? css("var(--danger)") : css("var(--line)");
-        g.lineWidth = (e.m ? 1.5 : 0.7) * depth;
-        g.globalAlpha = (e.m ? 0.8 : 0.4) * depth;
+        g.lineWidth = (e.m ? 1.5 : 0.7) * Math.min(depth, 2);
+        g.globalAlpha = (e.m ? 0.8 : 0.4) * Math.min(depth,1.4) * (on ? 1 : 0.08);
         g.stroke();
 
-        // Arrowhead on malicious edges: infection has a direction, and a plain
-        // line does not say which way it runs.
-        if(e.m && depth > 0.55){
+        if(e.m && on && depth > 0.5){
           const dx=b.sx-a.sx, dy=b.sy-a.sy, L=Math.hypot(dx,dy)||1;
-          const ux=dx/L, uy=dy/L, tipX=b.sx-ux*7, tipY=b.sy-uy*7, sz=5*depth;
+          const ux=dx/L, uy=dy/L, tipX=b.sx-ux*7, tipY=b.sy-uy*7;
+          const ah=5*Math.min(depth,1.6);
           g.beginPath();
           g.moveTo(tipX, tipY);
-          g.lineTo(tipX-ux*sz+uy*sz*0.55, tipY-uy*sz-ux*sz*0.55);
-          g.lineTo(tipX-ux*sz-uy*sz*0.55, tipY-uy*sz+ux*sz*0.55);
+          g.lineTo(tipX-ux*ah+uy*ah*0.55, tipY-uy*ah-ux*ah*0.55);
+          g.lineTo(tipX-ux*ah-uy*ah*0.55, tipY-uy*ah+ux*ah*0.55);
           g.closePath(); g.fillStyle=css("var(--danger)"); g.fill();
         }
         g.globalAlpha = 1;
-     });
+      });
 
-    // Nodes, far to near.
-    proj.slice().sort((a,b)=>b.z-a.z).forEach(pt=>{
-      const n = nodes[pt.i];
+    state.proj.slice().sort((a,b)=>b.z-a.z).forEach(pt=>{
+      const n = state.nodes[pt.i];
       const sev = nodeSeverity(n);
       const base = n.monitored ? 5 + Math.min(7, Math.log10(n.flows+1)*2.6) : 3;
-      const r = base * pt.s;
+      const r = base * Math.min(pt.s, 2.4);
       const flagged = sev === "risk" || sev === "anomaly";
+      const on = lit(pt.i);
+      const isSel = pt.i === sel;
 
-      if(flagged){
-        g.beginPath(); g.arc(pt.sx, pt.sy, r + 9*pt.s, 0, 6.283);
-        g.fillStyle = sev === "risk" ? "rgba(211,32,64,.20)" : "rgba(168,106,0,.20)";
+      g.globalAlpha = on ? 1 : 0.12;
+
+      if(flagged || isSel){
+        g.beginPath();
+        g.arc(pt.sx, pt.sy, r + (isSel ? 13 : 9)*Math.min(pt.s,2), 0, 6.283);
+        g.fillStyle = isSel ? "rgba(31,111,235,.22)"
+                    : sev === "risk" ? "rgba(211,32,64,.20)" : "rgba(168,106,0,.20)";
         g.fill();
       }
       g.beginPath(); g.arc(pt.sx, pt.sy, r, 0, 6.283);
       g.fillStyle = css(SEV_COLOR[sev]);
-      g.globalAlpha = n.monitored ? 1 : 0.45 + 0.55*pt.s;
-      g.fill(); g.globalAlpha = 1;
-      g.strokeStyle = css("var(--panel)"); g.lineWidth = 1.2*pt.s; g.stroke();
+      if(!n.monitored) g.globalAlpha *= 0.45 + 0.55*Math.min(pt.s,1);
+      g.fill(); g.globalAlpha = on ? 1 : 0.12;
+      g.strokeStyle = isSel ? css("var(--accent)") : css("var(--panel)");
+      g.lineWidth = (isSel ? 2.5 : 1.2) * Math.min(pt.s,2); g.stroke();
 
-      if(flagged && pt.s > 0.5){
+      if((flagged || isSel) && on && pt.s > 0.45){
         const tag = n.id + (sev === "anomaly" && n.surprise_z != null
-                            ? "  " + n.surprise_z.toFixed(1) + "\u03c3" : "");
-        g.font = "600 " + (11*pt.s).toFixed(1) + "px " + css("var(--mono)");
+                            ? "  " + n.surprise_z.toFixed(1) + "σ" : "");
+        const fs = Math.min(11*pt.s, 15);
+        g.font = "600 " + fs.toFixed(1) + "px " + css("var(--mono)");
         g.textAlign = "center"; g.textBaseline = "bottom";
         const tw = g.measureText(tag).width;
-        g.fillStyle = css("var(--panel)"); g.globalAlpha = 0.85;
-        g.fillRect(pt.sx - tw/2 - 4, pt.sy - r - 9 - 12*pt.s, tw + 8, 13*pt.s + 3);
+        g.fillStyle = css("var(--panel)"); g.globalAlpha = 0.88;
+        g.fillRect(pt.sx - tw/2 - 4, pt.sy - r - 9 - fs, tw + 8, fs + 4);
         g.globalAlpha = 1;
-        g.fillStyle = css(SEV_COLOR[sev]);
+        g.fillStyle = isSel ? css("var(--accent)") : css(SEV_COLOR[sev]);
         g.fillText(tag, pt.sx, pt.sy - r - 8);
       }
+      g.globalAlpha = 1;
     });
 
-    angle += 0.0022;                      // slow enough to read, fast enough to see
+    if(state.spin) state.ay += 0.0022;
     GRAPH_ANIM = requestAnimationFrame(frame);
   }
   frame();
@@ -1079,6 +1224,7 @@ async function loadTopology(){
       <div class="row"><div class="card">
         <h3>Network topology &mdash; who talks to whom</h3>
         <canvas id="graphChart"></canvas>
+        <div id="graphInfo" class="ginfo"></div>
         <div class="legend">
           <span><i style="background:var(--danger);height:11px;width:11px;border-radius:50%"></i>Flagged by risk</span>
           <span><i style="background:var(--warn);height:11px;width:11px;border-radius:50%"></i>Flagged by anomaly</span>
