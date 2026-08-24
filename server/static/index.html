@@ -457,85 +457,167 @@ function drawKillStrip(cv, timeline, upto, _t){
   g.fillText(n+" minutes", w, top+bh+9);
 }
 
-function drawGraph(cv, data, height, _t){
-  // Force-directed layout, hand-rolled. Three forces: repulsion between every
-  // pair, spring attraction along edges, and a weak pull to the centre so
-  // disconnected nodes do not drift off-canvas.
-  const _c = setupCanvas(cv, height);
-  if(!_c){ retryDraw(t=>drawGraph(cv,data,height,t), _t); return; }
-  const {g,w,h} = _c;
-  const nodes = data.nodes, edges = data.edges;
-  if(!nodes.length){
-    g.fillStyle=css("var(--txt-faint)"); g.font="13px "+css("var(--sans)");
-    g.textAlign="center"; g.fillText("No topology to draw.", w/2, h/2); return;
-  }
+// --- 3D topology -----------------------------------------------------------
+// Laid out and projected by hand rather than with a graph library: the page
+// must run with no network, so a CDN import is not available and bundling one
+// would be the only other option.
+let GRAPH_ANIM = null;
 
+function stopGraphAnim(){
+  if(GRAPH_ANIM){ cancelAnimationFrame(GRAPH_ANIM); GRAPH_ANIM = null; }
+}
+
+// Colour carries *both* detection channels. Colouring by supervised risk alone
+// drew anomaly-flagged hosts in the "low risk" green while red malicious edges
+// radiated out of them, and the header counted zero flagged hosts beside a
+// sidebar showing three.
+function nodeSeverity(n){
+  if(!n.monitored) return "peer";
+  if((n.risk ?? 0) >= 0.5) return "risk";
+  if(n.flag_reason === "anomaly") return "anomaly";
+  if((n.risk ?? 0) >= 0.25) return "elevated";
+  return "clean";
+}
+const SEV_COLOR = {
+  risk: "var(--danger)", anomaly: "var(--warn)", elevated: "var(--warn)",
+  clean: "var(--safe)", peer: "var(--txt-faint)",
+};
+
+function layoutGraph3D(data){
+  const nodes = data.nodes, edges = data.edges;
   const idx = new Map(nodes.map((n,i)=>[n.id,i]));
-  const P = nodes.map((n,i)=>({
-    x: w/2 + Math.cos(i/nodes.length*6.283)*Math.min(w,h)*0.33 + (Math.random()-0.5)*20,
-    y: h/2 + Math.sin(i/nodes.length*6.283)*Math.min(w,h)*0.33 + (Math.random()-0.5)*20,
-    vx:0, vy:0
-  }));
   const E = edges.map(e=>({s:idx.get(e.source), t:idx.get(e.target), m:e.malicious}))
                  .filter(e=>e.s!=null && e.t!=null);
 
-  for(let step=0; step<220; step++){
+  // Seed on a sphere. Flagged hosts start near the origin so the layout pulls
+  // the story to the middle instead of leaving it on the rim.
+  const P = nodes.map((n,i)=>{
+    const flagged = nodeSeverity(n) === "risk" || nodeSeverity(n) === "anomaly";
+    const r = flagged ? 40 : 190;
+    const phi = Math.acos(1 - 2*(i + 0.5)/nodes.length);
+    const th  = Math.PI * (1 + Math.sqrt(5)) * i;
+    return { x:r*Math.sin(phi)*Math.cos(th), y:r*Math.sin(phi)*Math.sin(th),
+             z:r*Math.cos(phi), vx:0, vy:0, vz:0 };
+  });
+
+  for(let step=0; step<200; step++){
     for(let i=0;i<P.length;i++){
       for(let j=i+1;j<P.length;j++){
-        let dx=P[j].x-P[i].x, dy=P[j].y-P[i].y;
-        let d2=dx*dx+dy*dy+0.01, d=Math.sqrt(d2);
-        const rep = 2600/d2;
-        const fx=dx/d*rep, fy=dy/d*rep;
-        P[i].vx-=fx; P[i].vy-=fy; P[j].vx+=fx; P[j].vy+=fy;
+        const dx=P[j].x-P[i].x, dy=P[j].y-P[i].y, dz=P[j].z-P[i].z;
+        const d2=dx*dx+dy*dy+dz*dz+0.01, d=Math.sqrt(d2), rep=9000/d2;
+        const fx=dx/d*rep, fy=dy/d*rep, fz=dz/d*rep;
+        P[i].vx-=fx; P[i].vy-=fy; P[i].vz-=fz;
+        P[j].vx+=fx; P[j].vy+=fy; P[j].vz+=fz;
       }
     }
     E.forEach(e=>{
       const a=P[e.s], b=P[e.t];
-      let dx=b.x-a.x, dy=b.y-a.y, d=Math.sqrt(dx*dx+dy*dy)+0.01;
-      const f=(d-70)*0.012;
-      const fx=dx/d*f, fy=dy/d*f;
-      a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
+      const dx=b.x-a.x, dy=b.y-a.y, dz=b.z-a.z;
+      const d=Math.sqrt(dx*dx+dy*dy+dz*dz)+0.01, f=(d-95)*0.010;
+      const fx=dx/d*f, fy=dy/d*f, fz=dz/d*f;
+      a.vx+=fx; a.vy+=fy; a.vz+=fz; b.vx-=fx; b.vy-=fy; b.vz-=fz;
     });
     P.forEach(p=>{
-      p.vx += (w/2-p.x)*0.0016; p.vy += (h/2-p.y)*0.0016;
-      p.vx*=0.82; p.vy*=0.82;
-      p.x+=p.vx; p.y+=p.vy;
-      p.x=Math.max(22,Math.min(w-22,p.x)); p.y=Math.max(22,Math.min(h-22,p.y));
+      p.vx += -p.x*0.0016; p.vy += -p.y*0.0016; p.vz += -p.z*0.0016;
+      p.vx*=0.84; p.vy*=0.84; p.vz*=0.84;
+      p.x+=p.vx; p.y+=p.vy; p.z+=p.vz;
     });
   }
+  return {P, E, nodes};
+}
 
-  g.clearRect(0,0,w,h);
-  E.forEach(e=>{
-    g.beginPath(); g.moveTo(P[e.s].x,P[e.s].y); g.lineTo(P[e.t].x,P[e.t].y);
-    g.strokeStyle = e.m ? css("var(--danger)") : css("var(--line)");
-    g.lineWidth = e.m ? 1.4 : 0.6;
-    g.globalAlpha = e.m ? 0.75 : 0.5;
-    g.stroke(); g.globalAlpha = 1;
-  });
+function drawGraph(cv, data, height, _t){
+  const _c = setupCanvas(cv, height);
+  if(!_c){ retryDraw(t=>drawGraph(cv,data,height,t), _t); return; }
+  const {g,w,h} = _c;
 
-  nodes.forEach((n,i)=>{
-    const p=P[i];
-    const r = n.monitored ? 5 + Math.min(7, Math.log10(n.flows+1)*2.6) : 3;
-    let fill;
-    if(!n.monitored) fill = css("var(--txt-faint)");
-    else if(n.risk >= 0.5) fill = css("var(--danger)");
-    else if(n.risk >= 0.25) fill = css("var(--warn)");
-    else fill = css("var(--safe)");
+  stopGraphAnim();
+  if(!data.nodes.length){
+    g.clearRect(0,0,w,h);
+    g.fillStyle=css("var(--txt-faint)"); g.font="13px "+css("var(--sans)");
+    g.textAlign="center"; g.fillText("No topology to draw.", w/2, h/2); return;
+  }
 
-    if(n.monitored && n.risk >= 0.5){
-      g.beginPath(); g.arc(p.x,p.y,r+7,0,6.283);
-      g.fillStyle="rgba(211,32,64,.18)"; g.fill();
-    }
-    g.beginPath(); g.arc(p.x,p.y,r,0,6.283);
-    g.fillStyle=fill; g.fill();
-    g.strokeStyle=css("var(--panel)"); g.lineWidth=1.2; g.stroke();
+  const {P, E, nodes} = layoutGraph3D(data);
+  const FOCAL = 620;                      // perspective strength
+  let angle = -0.35;
 
-    if(n.monitored && n.risk >= 0.5){
-      g.fillStyle=css("var(--txt)"); g.font="600 11px "+css("var(--mono)");
-      g.textAlign="center"; g.textBaseline="bottom";
-      g.fillText(n.id, p.x, p.y-r-9);
-    }
-  });
+  function frame(){
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    // Rotate about Y, then project. Depth decides draw order, size and alpha,
+    // which is what makes the scene read as 3D on a flat canvas.
+    const proj = P.map((p,i)=>{
+      const x =  p.x*cos + p.z*sin;
+      const z = -p.x*sin + p.z*cos;
+      const s = FOCAL / (FOCAL + z + 260);
+      return { sx: w/2 + x*s, sy: h/2 + p.y*s, s, z, i };
+    });
+
+    g.clearRect(0,0,w,h);
+
+    // Edges first, far to near.
+    E.map(e=>({e, z:(proj[e.s].z + proj[e.t].z)/2}))
+     .sort((a,b)=>b.z-a.z)
+     .forEach(({e})=>{
+        const a=proj[e.s], b=proj[e.t];
+        const depth = Math.min(a.s, b.s);
+        g.beginPath(); g.moveTo(a.sx,a.sy); g.lineTo(b.sx,b.sy);
+        g.strokeStyle = e.m ? css("var(--danger)") : css("var(--line)");
+        g.lineWidth = (e.m ? 1.5 : 0.7) * depth;
+        g.globalAlpha = (e.m ? 0.8 : 0.4) * depth;
+        g.stroke();
+
+        // Arrowhead on malicious edges: infection has a direction, and a plain
+        // line does not say which way it runs.
+        if(e.m && depth > 0.55){
+          const dx=b.sx-a.sx, dy=b.sy-a.sy, L=Math.hypot(dx,dy)||1;
+          const ux=dx/L, uy=dy/L, tipX=b.sx-ux*7, tipY=b.sy-uy*7, sz=5*depth;
+          g.beginPath();
+          g.moveTo(tipX, tipY);
+          g.lineTo(tipX-ux*sz+uy*sz*0.55, tipY-uy*sz-ux*sz*0.55);
+          g.lineTo(tipX-ux*sz-uy*sz*0.55, tipY-uy*sz+ux*sz*0.55);
+          g.closePath(); g.fillStyle=css("var(--danger)"); g.fill();
+        }
+        g.globalAlpha = 1;
+     });
+
+    // Nodes, far to near.
+    proj.slice().sort((a,b)=>b.z-a.z).forEach(pt=>{
+      const n = nodes[pt.i];
+      const sev = nodeSeverity(n);
+      const base = n.monitored ? 5 + Math.min(7, Math.log10(n.flows+1)*2.6) : 3;
+      const r = base * pt.s;
+      const flagged = sev === "risk" || sev === "anomaly";
+
+      if(flagged){
+        g.beginPath(); g.arc(pt.sx, pt.sy, r + 9*pt.s, 0, 6.283);
+        g.fillStyle = sev === "risk" ? "rgba(211,32,64,.20)" : "rgba(168,106,0,.20)";
+        g.fill();
+      }
+      g.beginPath(); g.arc(pt.sx, pt.sy, r, 0, 6.283);
+      g.fillStyle = css(SEV_COLOR[sev]);
+      g.globalAlpha = n.monitored ? 1 : 0.45 + 0.55*pt.s;
+      g.fill(); g.globalAlpha = 1;
+      g.strokeStyle = css("var(--panel)"); g.lineWidth = 1.2*pt.s; g.stroke();
+
+      if(flagged && pt.s > 0.5){
+        const tag = n.id + (sev === "anomaly" && n.surprise_z != null
+                            ? "  " + n.surprise_z.toFixed(1) + "\u03c3" : "");
+        g.font = "600 " + (11*pt.s).toFixed(1) + "px " + css("var(--mono)");
+        g.textAlign = "center"; g.textBaseline = "bottom";
+        const tw = g.measureText(tag).width;
+        g.fillStyle = css("var(--panel)"); g.globalAlpha = 0.85;
+        g.fillRect(pt.sx - tw/2 - 4, pt.sy - r - 9 - 12*pt.s, tw + 8, 13*pt.s + 3);
+        g.globalAlpha = 1;
+        g.fillStyle = css(SEV_COLOR[sev]);
+        g.fillText(tag, pt.sx, pt.sy - r - 8);
+      }
+    });
+
+    angle += 0.0022;                      // slow enough to read, fast enough to see
+    GRAPH_ANIM = requestAnimationFrame(frame);
+  }
+  frame();
 }
 
 function drawSurprise(cv, timeline, _t){
@@ -977,7 +1059,8 @@ async function loadTopology(){
   el.innerHTML = `<div class="msg"><span class="spin"></span>Laying out the network…</div>`;
   try{
     const g = await api(`/api/graph?scenario=${SCENARIO}`);
-    const flagged = g.nodes.filter(n=>n.monitored && n.risk >= 0.5);
+    const flagged = g.nodes.filter(n => n.monitored &&
+      ((n.risk ?? 0) >= 0.5 || n.flag_reason === "anomaly"));
     const T = g.totals || {};
     el.innerHTML = `
       <div class="row k3">
@@ -997,17 +1080,21 @@ async function loadTopology(){
         <h3>Network topology &mdash; who talks to whom</h3>
         <canvas id="graphChart"></canvas>
         <div class="legend">
-          <span><i style="background:var(--danger);height:11px;width:11px;border-radius:50%"></i>Flagged host</span>
-          <span><i style="background:var(--warn);height:11px;width:11px;border-radius:50%"></i>Elevated risk</span>
-          <span><i style="background:var(--safe);height:11px;width:11px;border-radius:50%"></i>Monitored, low risk</span>
+          <span><i style="background:var(--danger);height:11px;width:11px;border-radius:50%"></i>Flagged by risk</span>
+          <span><i style="background:var(--warn);height:11px;width:11px;border-radius:50%"></i>Flagged by anomaly</span>
+          <span><i style="background:var(--safe);height:11px;width:11px;border-radius:50%"></i>Monitored, clean</span>
           <span><i style="background:var(--txt-faint);height:8px;width:8px;border-radius:50%"></i>External peer</span>
-          <span><i style="background:var(--danger)"></i>Malicious connection</span>
+          <span><i style="background:var(--danger)"></i>Malicious connection (dataset label) &rarr; direction of traffic</span>
         </div>
-        <div class="hint">Node size follows traffic volume; colour is the risk
-          score from the same model the Forecast tab uses. Only the busiest
-          hosts are drawn &mdash; a full capture has hundreds of peers and the
-          point of this view is to see the compromised machine sitting inside a
-          legible neighbourhood.</div>
+        <div class="hint">Node size follows traffic volume. <strong>Node colour is
+          what our model concluded; edge colour is the dataset's own
+          label.</strong> That mix is deliberate &mdash; a green node with red
+          edges leaving it is a host the model missed, and hiding those would
+          make the picture flatter than the truth. Only the busiest hosts are
+          drawn, plus everything touching malicious traffic: a full capture has
+          hundreds of peers and the point of this view is to see the compromised
+          machine inside a legible neighbourhood. The scene rotates slowly so
+          depth reads as depth.</div>
       </div></div>`;
     drawGraph($("#graphChart"), g, 560);
     collapseHints(el);
@@ -1178,6 +1265,9 @@ function selectTab(which){
     t.classList.add("on");
     // Playback keeps running otherwise, burning a timer behind a hidden canvas.
     if(which !== "forecast") replayStop();
+    // The topology view animates; leaving it running behind a hidden tab
+    // burns a frame budget nobody is looking at.
+    if(which !== "topology") stopGraphAnim();
     $("#forecastTab").style.display  = which==="forecast" ?"":"none";
     $("#topologyTab").style.display  = which==="topology" ?"":"none";
     $("#benchmarkTab").style.display = which==="benchmark"?"":"none";

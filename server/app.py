@@ -259,11 +259,17 @@ def graph(scenario: int = Query(...), max_nodes: int = Query(90, ge=10, le=400))
     nodes = []
     for host in sorted(keep):
         info = ranked.get(host)
+        # Both channels travel to the graph, not just the supervised score. A
+        # host the anomaly channel flagged was being drawn in the "low risk"
+        # colour while red malicious edges radiated from it, and the header
+        # counted zero flagged hosts beside a sidebar showing three.
         nodes.append({
             "id": host,
             "internal": any(host.startswith(p) for p in INTERNAL_PREFIXES),
             "flows": float(volume.get(host, 0.0)),
             "risk": float(info["observed_peak_risk"]) if info else None,
+            "surprise_z": float(info["surprise_z"]) if info else None,
+            "flag_reason": info["flag_reason"] if info else "",
             "stage": info["current_stage"] if info else None,
             "monitored": info is not None,
         })
