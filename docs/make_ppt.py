@@ -919,7 +919,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path,
                         default=Path(__file__).parent.parent /
                         "SIH2026_PS26153_Presentation.pptx")
-    parser.add_argument("--team-id", default="",
+    parser.add_argument("--team-id", default="261",
                         help="omitted from the title slide when empty")
     parser.add_argument("--team-name", default="Git with It")
     args = parser.parse_args()
