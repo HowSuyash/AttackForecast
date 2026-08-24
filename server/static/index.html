@@ -1246,7 +1246,12 @@ window.addEventListener("resize", ()=>{
 
     $("#scenario").innerHTML = META.scenarios.map(s=>
       `<option value="${s.id}">Scenario ${s.id} — ${s.family}</option>`).join("");
-    if(META.scenarios.length) loadScenario(META.scenarios[0].id);
+    // ?scenario=N opens a specific capture directly - useful when a demo needs
+    // to start somewhere other than the first one in the list.
+    const wantScenario = new URLSearchParams(location.search).get("scenario");
+    const ids = META.scenarios.map(s => s.id);
+    const start = (wantScenario && ids.includes(+wantScenario)) ? +wantScenario : ids[0];
+    if(ids.length){ $("#scenario").value = start; loadScenario(start); }
     else fail("No prepared captures. Run <code>python -m src.prepare_data</code>.");
 
     const want = location.hash.slice(1);
