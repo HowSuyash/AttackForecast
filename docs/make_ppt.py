@@ -318,6 +318,11 @@ def build_title(slide, team_id: str, team_name: str) -> None:
         ("Team ID", team_id),
         ("Team Name", team_name),
     ]
+    # Drop any row we have no real value for. A line reading "[Team ID]" looks
+    # like an unfilled template; an absent line just looks finished, and the ID
+    # can be added later with --team-id.
+    rows = [(k, v) for k, v in rows if v and not v.startswith("[")]
+
     for i, (k, v) in enumerate(rows):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.space_after = Pt(7)
@@ -642,7 +647,8 @@ def main() -> None:
     parser.add_argument("--out", type=Path,
                         default=Path(__file__).parent.parent /
                         "SIH2026_PS26153_Presentation.pptx")
-    parser.add_argument("--team-id", default="[Team ID]")
+    parser.add_argument("--team-id", default="",
+                        help="omitted from the title slide when empty")
     parser.add_argument("--team-name", default="Git with It")
     args = parser.parse_args()
 
