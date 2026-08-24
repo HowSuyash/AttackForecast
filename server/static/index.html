@@ -137,6 +137,36 @@ select,.btn{width:100%;background:var(--panel-2);color:var(--txt);
 .stage.now .badge{background:var(--accent);color:#fff}
 .stage.pred .badge{background:var(--danger);color:#fff}
 
+/* ---------- topology: floating overlays + full screen ---------- */
+.gcard{position:relative}
+/* Totals float over the canvas instead of occupying a row above it. In full
+   screen there is no "above", and inline the graph gets that height back. */
+.gstats{position:absolute;top:52px;left:16px;z-index:3;display:flex;flex-direction:column;
+        gap:7px;pointer-events:none}
+.gstat{background:rgba(255,255,255,.92);border:1px solid var(--line);
+       border-radius:8px;padding:7px 11px;min-width:172px;max-width:250px;
+       box-shadow:var(--shadow);backdrop-filter:blur(3px)}
+.gstat .k{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;
+          color:var(--txt-faint)}
+.gstat .v{display:block;font-family:var(--mono);font-size:20px;font-weight:700;
+          line-height:1.15;color:var(--txt)}
+.gstat .v.danger{color:var(--danger)} .gstat .v.safe{color:var(--safe)}
+.gstat .s{display:block;font-size:10px;color:var(--txt-dim);margin-top:1px;
+          word-break:break-word}
+/* Only the first button gets the auto margin; with it on every button a
+   space-between header spreads them across the width instead of grouping
+   them at the right. */
+.card h3 > .q{margin-left:0}
+.card h3 > .q:first-of-type{margin-left:auto}
+
+.gcard.isfull{border-radius:0;border:none;height:100vh;overflow:hidden;
+              padding:14px 18px;background:var(--panel)}
+.gcard.isfull .ginfo{position:absolute;right:18px;bottom:56px;width:390px;
+                     max-height:44vh;overflow-y:auto;z-index:3;
+                     background:rgba(255,255,255,.94);backdrop-filter:blur(3px)}
+.gcard.isfull .legend{position:absolute;left:18px;bottom:16px;right:430px;z-index:3}
+.gcard.isfull .hint{display:none}
+
 /* ---------- topology selection panel ---------- */
 .ginfo{margin-top:12px;padding:11px 13px;background:var(--panel-2);
        border:1px solid var(--line);border-radius:8px;font-size:12px;min-height:44px}
@@ -841,11 +871,15 @@ function collapseHints(root){
     const h3 = card.querySelector(":scope > h3");
     const hints = [...card.querySelectorAll(":scope > .hint")]
                     .filter(h => !h.classList.contains("keep"));
-    if(!h3 || !hints.length || h3.querySelector(".q")) return;
+    // Marked with a data attribute, not just the class: other buttons in a card
+    // header share the .q styling (the topology full-screen control does), and
+    // matching on class alone made this skip those cards entirely.
+    if(!h3 || !hints.length || h3.querySelector("[data-hint-toggle]")) return;
 
     hints.forEach(h => { h.hidden = true; });
     const b = document.createElement("button");
     b.type = "button"; b.className = "q"; b.textContent = "?";
+    b.dataset.hintToggle = "1";
     b.title = "What am I looking at?";
     b.onclick = () => {
       const show = hints[0].hidden;
@@ -1198,6 +1232,19 @@ function renderForecast(d){
   }
 }
 
+// Canvas height for the topology scene. In full screen the graph is the only
+// thing on the page, so it takes what is left after the overlays; inline it
+// keeps a fixed, generous box.
+function graphHeight(){
+  return document.fullscreenElement
+    ? Math.max(360, window.innerHeight - 96)
+    : 620;
+}
+
+function redrawGraph(){
+  if(TOPOLOGY && $("#graphChart")) drawGraph($("#graphChart"), TOPOLOGY, graphHeight());
+}
+
 async function loadTopology(){
   const el = $("#topologyTab");
   if(SCENARIO == null){ el.innerHTML = `<div class="msg">Pick a capture first.</div>`; return; }
@@ -1207,24 +1254,36 @@ async function loadTopology(){
     const flagged = g.nodes.filter(n => n.monitored &&
       ((n.risk ?? 0) >= 0.5 || n.flag_reason === "anomaly"));
     const T = g.totals || {};
+
+    // The capture totals sit on the canvas rather than in a row above it. They
+    // are context for the picture, and a full-screen graph has no "above".
     el.innerHTML = `
-      <div class="row k3">
-        <div class="card"><h3>Hosts in capture</h3>
-          <div class="stat">${(T.hosts||g.nodes.length).toLocaleString()}</div>
-          <div class="stat-sub">${g.nodes.length} drawn below &mdash; the busiest
-            plus everything touching malicious traffic</div></div>
-        <div class="card"><h3>Malicious peers contacted</h3>
-          <div class="stat danger">${(T.malicious_peers||0).toLocaleString()}</div>
-          <div class="stat-sub">across ${(T.malicious_pairs||0).toLocaleString()}
-            host pairs &mdash; the spam and C2 fan-out</div></div>
-        <div class="card"><h3>Flagged hosts</h3>
-          <div class="stat ${flagged.length?"danger":"safe"}">${flagged.length}</div>
-          <div class="stat-sub">${flagged.map(n=>n.id).join(", ") || "none above threshold"}</div></div>
-      </div>
-      <div class="row"><div class="card">
-        <h3>Network topology &mdash; who talks to whom</h3>
+      <div class="row"><div class="card gcard" id="graphCard">
+        <h3>Network topology &mdash; who talks to whom
+          <button class="q" id="graphFull" title="Full screen">&#9974;</button>
+        </h3>
+
+        <div class="gstats">
+          <div class="gstat">
+            <span class="k">Hosts in capture</span>
+            <span class="v">${(T.hosts || g.nodes.length).toLocaleString()}</span>
+            <span class="s">${g.nodes.length} drawn</span>
+          </div>
+          <div class="gstat">
+            <span class="k">Malicious peers</span>
+            <span class="v danger">${(T.malicious_peers || 0).toLocaleString()}</span>
+            <span class="s">${(T.malicious_pairs || 0).toLocaleString()} host pairs</span>
+          </div>
+          <div class="gstat">
+            <span class="k">Flagged hosts</span>
+            <span class="v ${flagged.length ? "danger" : "safe"}">${flagged.length}</span>
+            <span class="s">${flagged.map(n => n.id).join(", ") || "none above threshold"}</span>
+          </div>
+        </div>
+
         <canvas id="graphChart"></canvas>
         <div id="graphInfo" class="ginfo"></div>
+
         <div class="legend">
           <span><i style="background:var(--danger);height:11px;width:11px;border-radius:50%"></i>Flagged by risk</span>
           <span><i style="background:var(--warn);height:11px;width:11px;border-radius:50%"></i>Flagged by anomaly</span>
@@ -1239,14 +1298,28 @@ async function loadTopology(){
           make the picture flatter than the truth. Only the busiest hosts are
           drawn, plus everything touching malicious traffic: a full capture has
           hundreds of peers and the point of this view is to see the compromised
-          machine inside a legible neighbourhood. The scene rotates slowly so
-          depth reads as depth.</div>
+          machine inside a legible neighbourhood.</div>
       </div></div>`;
-    drawGraph($("#graphChart"), g, 560);
-    collapseHints(el);
+
     TOPOLOGY = g;
+    drawGraph($("#graphChart"), g, graphHeight());
+    collapseHints(el);
+
+    $("#graphFull").onclick = () => {
+      const card = $("#graphCard");
+      if(document.fullscreenElement) document.exitFullscreen();
+      else card.requestFullscreen && card.requestFullscreen();
+    };
   }catch(e){ el.innerHTML = `<div class="msg">${e.message}</div>`; }
 }
+
+// Entering or leaving full screen changes the canvas box, and a canvas keeps
+// its old bitmap across a resize, so the scene has to be laid out again.
+document.addEventListener("fullscreenchange", () => {
+  const card = $("#graphCard");
+  if(card) card.classList.toggle("isfull", !!document.fullscreenElement);
+  redrawGraph();
+});
 
 function renderHosts(list, onPick){
   HOST_ROWS = {};
@@ -1433,7 +1506,7 @@ function selectTab(which){
       drawAttention($("#attnChart"), (CURRENT.explanation||{}).temporal_attention);
     }
     if(which==="topology" && TOPOLOGY && $("#graphChart")){
-      drawGraph($("#graphChart"), TOPOLOGY, 560);
+      redrawGraph();
     }
 }
 
@@ -1450,7 +1523,7 @@ window.addEventListener("hashchange", ()=> selectTab(location.hash.slice(1)));
 $("#scenario").onchange = e=> loadScenario(+e.target.value);
 
 window.addEventListener("resize", ()=>{
-  if(TOPOLOGY && $("#graphChart")) drawGraph($("#graphChart"), TOPOLOGY, 560);
+  redrawGraph();
   if(!CURRENT) return;
   const fc = $("#fcChart"), at = $("#attnChart"), sp = $("#surpChart");
   const st = $("#stripChart");
