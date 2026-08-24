@@ -241,6 +241,9 @@ Dropdown se **Scenario 9** chuno. (Ya direct: `http://127.0.0.1:8000/?scenario=9
 > mein hum 0.647 dete hain, 'maan lo kuch nahi badlega' wala baseline 0.478.
 > 10 mein se 9 horizons pe hum aage hain.
 >
+> *(Chart pe cursor ghumao)* Har point pe exact numbers aa jaate hain — kitne
+> minute aage, humara kya, baseline ka kya, aur gap kitna."
+>
 > Aur ye naye malware pe bhi transfer karta hai — Neris aur Rbot pe train kiya,
 > **Virut aur Murlo pe test**, F1 0.874."
 
@@ -251,6 +254,7 @@ Dropdown se **Scenario 9** chuno. (Ya direct: `http://127.0.0.1:8000/?scenario=9
 | *"To tumhara model baseline se behtar nahi hai?"* | "Detection mein nahi. Aur wahi honest baat hai. Par PS detection nahi maangta — wo **forecasting aur progression** maangta hai. Wahan hum clearly aage hain." |
 | *"Baseline ko kam data diya kya?"* | "Nahi. Bilkul wahi features, wahi scaler, wahi labels. Stacked wale baseline ko to wahi 8-window history bhi di jo humare model ko milti hai." |
 | *"Threshold kaise chuna?"* | "Validation split pe, aur test chhune se pehle freeze kar diya. Test pe tune karte to har number badh jaata." |
+| *"+1 window pe to dono barabar hain"* | "Haan, wahan gap 0.0003 hai — tie hai, aur tooltip khud 'level' likhta hai. 1 minute aage stage badalta hi nahi, to 'kuch nahi badlega' maanna sahi jawab hai. Model ka fayda **3 se 7 windows** pe dikhta hai, jahan actually stage shift hota hai — wahan gap 0.17 tak jaata hai." |
 | *"Persistence baseline kya hai?"* | "'Maan lo stage nahi badlega.' Ye forecasting mein sabse imandaar baseline hai — agar usse nahi jeet paate to model ne dynamics seekhi hi nahi. Do variants hain, ek ko ground truth deke (oracle) aur ek ko model ka apna estimate deke (fair)." |
 
 ---
