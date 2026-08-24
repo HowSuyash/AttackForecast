@@ -494,6 +494,10 @@ uske baad har click **1 second**. Demo se pehle ek baar load kar lena.
 
 ![Dashboard](images/dashboard-full.png)
 
+> **Note:** neeche ke kuch screenshots purane build ke hain. Jin panels ka look
+> badla hai — MITRE kill chain, Topology, aur Explainability — unka text current
+> UI ke hisaab se likha hai, image thodi alag dikhegi. Text pe bharosa karna.
+
 ### Left side — hosts ki list
 
 ![Host list](images/panel-hosts.png)
@@ -524,7 +528,17 @@ tha ya nahi.
 >
 > Static chart mein tum ye **batate** ho. Replay mein wo **dikh jaata** hai.
 
-Slider se kisi bhi minute pe ja sakte ho, aur speed Slow/Normal/Fast chun sakte ho.
+**Play ke dauraan teen cheezein hilti hain** (pehle sirf clock chalta tha, ab
+theek kar diya):
+
+1. **Playhead** — "now" wala divider baayein se daayein safar karta hai. Uske
+   aage ki **halki line** wo waqt hai jo model ne abhi dekha hi nahi.
+2. **Neeche MITRE kill chain** — NOW aur PREDICTED card live badalte hain.
+3. **Model surprise chart** — usme bhi ek playhead saath chalta hai, aur clock
+   mein surprise ka number badalta rehta hai.
+
+Slider se kisi bhi minute pe ja sakte ho, aur speed Slow/Normal/Fast chun sakte
+ho. Normal pe poora capture ~1 minute leta hai, Fast pe ~20 second.
 
 Technically: saare frames server pe **ek batched pass** mein bante hain
 (145 frames ≈ 2 second), har frame pe alag model call nahi hoti.
@@ -544,20 +558,53 @@ baaki halka pad jaata hai, aur ek cursor line position dikhati hai.
 
 ![Kill chain](images/panel-killchain.png)
 
-5 stages, aur jahan host abhi hai wahan **NOW** ka badge. Agar model aage badhne
-ka predict kare to wo stage bhi highlight hoti hai.
+5 stages **chevron** (teer jaise) shape mein — kyunki panel ka kaam hi ye kehna
+hai ki attack baayein se daayein badh raha hai. Jahan host abhi hai wahan **NOW**,
+aur jahan model ke hisaab se jaayega wahan **PREDICTED**. Neeche ek badi line
+mein poori baat: *"Reconnaissance now → Exfiltration predicted next"*.
+
+Teen cheezein jaan lo:
+
+- **Amber (peela) PREDICTED** — model kabhi **neeche** wala stage predict karta
+  hai (jaise Exfiltration se wapas Reconnaissance). Ye bug nahi hai. Usko laal
+  nahi rakha kyunki de-escalation aur escalation ek jaise nahi dikhne chahiye.
+- **"not learned" badge** — Initial Access aur Lateral Movement pe likha aata
+  hai. CTU-13 mein inke sirf 13 aur 37 windows hain, to model inhe kabhi predict
+  karta hi nahi. Card pe likh diya hai taaki khaali card ko "attack yahan nahi
+  hai" na samjha jaaye.
+- Replay chalte waqt ye panel **live badalta hai**.
 
 ### Topology tab — network ka naksha
 
 ![Topology](images/panel-topology.png)
 
-Upar **Topology** tab pe click karo.
+Upar **Topology** tab pe click karo. Ye **3D** scene hai, dheere-dheere ghoomta
+rehta hai.
 
-- **Laal node** — flagged host (`147.32.84.165`)
-- **Laal lines** — malicious connections
-- **Hare nodes** — monitored hosts, low risk
+- **Laal node** — risk se flagged host (`147.32.84.165`)
+- **Amber node** — anomaly channel se flagged host (risk kam, par surprise zyada)
+- **Hare nodes** — monitored hosts, clean
 - **Chhote grey** — external peers
+- **Laal lines + teer** — malicious connections, teer traffic ki direction batata
 - Node ka size traffic volume se
+
+**Chala kaise sakte ho:**
+
+| Kya karo | Kya hoga |
+|---|---|
+| Scroll | Zoom in / out |
+| Drag | Scene ghumao (auto-rotation ruk jaayegi) |
+| Kisi node pe click | Sirf usi ka neighbourhood highlight, neeche uske saare connections ki list |
+| Double click | Sab reset |
+| Upar-daayein wala button | Full screen |
+
+Stats (hosts, malicious peers, flagged hosts) canvas ke upar float karte hain, to
+full screen mein bhi dikhte rehte hain.
+
+Ek baat jo poochhi ja sakti hai: **node ka rang humare model ka conclusion hai,
+edge ka rang dataset ka apna label hai.** Isliye kabhi-kabhi hara node dikhega
+jisme se laal edges nikal rahi hain — wo host humara model **miss kar gaya**.
+Chhupaya nahi hai jaan-boojh kar.
 
 Jo laal **starburst** dikh raha hai — wo bot ka spam fan-out hai. Stats batate
 hain: capture mein **3,463 hosts**, aur bot ne **1,850 malicious peers** se
@@ -573,6 +620,18 @@ baat ki.
 - **Decision support** — ek line mein plain English wajah
 - **Feature attribution** — kis number ne kitna contribute kiya (`Flow count 21.0%`)
 - **Expected state change** — traffic mein kya badlega (`2.12 → 9.36`)
+- **Temporal attention** — model ne **kaunse purane minute** dekhe
+
+Temporal attention wala panel sabse neeche hai aur samajhne mein sabse aasaan
+hai, bas ek baat pata honi chahiye: model ke paas **120 minute** ka past tha.
+Agar wo sab pe barabar dhyaan deta to har minute ko `1/120 = 0.8%` milta.
+
+Panel dikhata hai ki usne **25% attention sirf 5 minute** pe daala, aur sabse
+zyada 23 minute pehle wale pe — jo average se **7.7 guna** hai. Har row pe ye
+multiple likha hota hai (`7.7x even`), to khud padh ke bata sakte ho.
+
+Matlab model sirf pichhla minute nahi dekh raha. Wo timeline mein peechhe jaakar
+wo point uthata hai jahan se host badalna shuru hua tha.
 
 ### Upload PCAP button
 
@@ -582,7 +641,21 @@ aur wahi forecast chalayega. Test kiya hua hai: 4 lakh packets → 18,271 flows 
 
 ### Benchmark tab
 
-Upar `Benchmark` pe click karo — comparison table wahan hai.
+Upar `Benchmark` pe click karo.
+
+Sabse upar **teen badi tiles** — detection F1, MITRE stage macro-F1, aur false
+positive rate — har ek ke neeche wo baseline jise wo beat kar rahi hai. Chhote
+numbers wali poori table sabse neeche hai.
+
+Beech mein **horizon chart** hai, aur yahi is tab ka asli point hai: neeli line
+humara world model, grey dashed line "maan lo kuch nahi badlega" wala baseline.
+**Kisi bhi point pe cursor le jao** — exact numbers aa jaate hain: kitne minute
+aage, dono ka score, aur gap kitna.
+
+> Ek baat pehle se jaan lo: **+1 window pe dono barabar hain** (gap 0.0003, panel
+> khud "level" likhta hai). 1 minute aage stage badalta hi nahi, to persistence
+> ka jeetna expected hai. Humara fayda **3 se 7 windows** pe hai, jahan gap 0.17
+> tak jaata hai.
 
 ---
 
