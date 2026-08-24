@@ -32,3 +32,6 @@ desktop.ini
 # Scratch output
 *.log
 /tmp/
+
+# Office lock files, left behind when the deck is open in a viewer
+~$*

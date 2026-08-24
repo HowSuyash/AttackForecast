@@ -460,17 +460,20 @@ def add_arrow_flow(slide, x, y, w, items):
 def add_chain(slide, x, y, w, h, items):
     """Interlocking outlines - the reference deck's uniqueness figure."""
     n = len(items)
-    link_w = (w + (n - 1) * 0.24) / n
-    step = link_w - 0.24
+    link_w = (w + (n - 1) * 0.16) / n
+    step = link_w - 0.16
     for i, (head, detail) in enumerate(items):
         colour = PALETTE[(i + 2) % len(PALETTE)]
         lx = x + i * step
+        # The claim rides inside its own link. Left outside, the links were
+        # three empty outlines and the text below them read as unrelated.
         shp(slide, MSO_SHAPE.ROUNDED_RECTANGLE, lx, y, link_w, h,
-            fill=None, line=colour, line_w=4.5)
+            fill=None, line=colour, line_w=4.5, lines=[head], size=8,
+            color=colour, bold=True)
         # Inset past the interlock: the links overlap by design, so captions
         # set to the full link width would sit on each other.
-        label(slide, lx + 0.20, y + h + 0.05, link_w - 0.40, 0.72,
-              [(head, 8, True), (detail, 7, False)], color=colour, spacing=1)
+        label(slide, lx + 0.14, y + h + 0.06, link_w - 0.28, 0.62,
+              [(detail, 7.5, False)], color=MUTED)
 
 
 def add_shields(slide, x, y, w, items, *, h=1.24):
@@ -763,14 +766,14 @@ def build_feasibility(slide, images_dir: Path) -> None:
     ])
 
     section(slide, LEFT, TOP + 1.92, lw, "Live output from the running prototype")
-    shot = images_dir / "g-topology.png"
+    shot = images_dir / "g-topology-crop.png"
     if shot.exists():
         with Image.open(shot) as img:
             aspect = img.width / img.height
         # Sized from the space left above the footer, then from the crop's
         # own aspect - a squashed screenshot looks exactly like one.
         top = TOP + 2.38
-        sh_h = min(BOTTOM - 0.34 - top, 3.95 / aspect)
+        sh_h = min(BOTTOM - 0.34 - top, lw / aspect)
         sw = sh_h * aspect
         slide.shapes.add_picture(
             str(shot), Inches(LEFT + (lw - sw) / 2), Inches(top),
@@ -800,9 +803,9 @@ def build_feasibility(slide, images_dir: Path) -> None:
         ("Reported, not hidden", "detection transfers; progression does not"),
     ])
 
-    add_band(slide, rx, BOTTOM - 1.02, rw, 0.44,
+    add_band(slide, rx, BOTTOM - 1.32, rw, 0.44,
              "Stage forecast macro-F1 by horizon", fill=NAVY, size=10.5)
-    add_table(slide, rx, BOTTOM - 0.56, rw, 0.56,
+    add_table(slide, rx, BOTTOM - 0.86, rw, 0.66,
               [
                   ["Horizon", "+2", "+4", "+6", "+10"],
                   ["World model (ours)", "0.583", "0.642", "0.624", "0.524"],
