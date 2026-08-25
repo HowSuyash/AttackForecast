@@ -159,7 +159,7 @@ bajaye amber hai — escalation aur de-escalation ek jaise nahi dikhne chahiye.
 
 | Sawal | Jawab |
 |---|---|
-| *"Sirf 3 stage kyun dikh rahe hain, 5 nahi?"* | "Kyunki CTU-13 mein wo hain hi nahi. Poore 13 captures mein Initial Access ke 27 aur Lateral Movement ke 37 windows hain — aur split ke baad **training set ko 1 aur 0 milte hain**. Lateral Movement training mein ek baar bhi nahi aata, to model use emit kar hi nahi sakta. Isliye humne dashboard pe hi likh diya ki wo unsupported hain." |
+| *"Sirf 3 stage kyun dikh rahe hain, 5 nahi?"* | "Kyunki CTU-13 mein wo hain hi nahi. Poore 13 captures mein Initial Access ke 27 aur Lateral Movement ke 37 windows hain, aur **training split ko 12 aur 26 milte hain — 1,67,895 benign windows ke saamne**. Itne pe koi model nahi seekh sakta. Humne check kiya hai: model inhe kabhi emit nahi karta, isliye dashboard pe hi 'not learned' likh diya." |
 | *"Stage labels kahan se aaye? Dataset mein to MITRE nahi hai."* | "CTU-13 ke labels sirf botnet/normal nahi hain — usme detail hai. `CC16` matlab command-and-control channel, `SPAM`, `Binary-Download`. Humne unhi annotations se stages nikale, apne guess se nahi. Table `src/mitre.py` mein ek jagah hai." |
 
 ### 2.5 Model surprise

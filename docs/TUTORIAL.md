@@ -569,9 +569,9 @@ Teen cheezein jaan lo:
   hai (jaise Exfiltration se wapas Reconnaissance). Ye bug nahi hai. Usko laal
   nahi rakha kyunki de-escalation aur escalation ek jaise nahi dikhne chahiye.
 - **"not learned" badge** — Initial Access aur Lateral Movement pe likha aata
-  hai. Poore 13 captures mein inke 27 aur 37 windows hain, aur training split
-  ko sirf **1 aur 0** milte hain — Lateral Movement to training mein ek baar bhi
-  nahi aata. Isliye model inhe kabhi predict
+  hai. Poore 13 captures mein inke 27 aur 37 windows hain, aur training split ko
+  **12 aur 26** milte hain — 1,67,895 benign windows ke saamne. Isliye model
+  inhe kabhi predict
   karta hi nahi. Card pe likh diya hai taaki khaali card ko "attack yahan nahi
   hai" na samjha jaaye.
 - Replay chalte waqt ye panel **live badalta hai**.
