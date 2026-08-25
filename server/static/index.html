@@ -1020,11 +1020,16 @@ function collapseHints(root){
 }
 
 // Stages the model has never been able to learn, because CTU-13 barely
-// contains them: 13 Initial Access cells and 37 Lateral Movement cells across
-// all seven captures. Listing them in a legend as though the line might turn
-// those colours is a promise the model cannot keep, so they are named as
-// unsupported instead of silently sitting in the key.
-const UNLEARNED_STAGES = {2: "13 training cells", 3: "37 training cells"};
+// contains them. Across all 13 captures there are 27 Initial Access and 37
+// Lateral Movement cells, and after the split the TRAINING set gets 1 and 0 -
+// Lateral Movement does not occur in training at all. The training count is
+// what is quoted here, because what the model could learn from is what decides
+// whether it can emit a stage.
+//
+// Listing them in a legend as though the line might turn those colours is a
+// promise the model cannot keep, so they are named as unsupported rather than
+// sitting silently in the key.
+const UNLEARNED_STAGES = {2: "1 training cell", 3: "0 training cells"};
 
 function stageLegend(d){
   const present = new Set();
@@ -1302,8 +1307,10 @@ function renderForecast(d){
         why the stage colour rather than the height carries the progression.
         Press <strong>Play</strong> to advance minute by minute.<br><br>
         <strong>*</strong> Initial Access and Lateral Movement are marked
-        unsupported: CTU-13 contains only 13 and 37 windows of them across all
-        seven captures, too few to learn, so the model never predicts either.
+        unsupported: across all 13 captures CTU-13 holds 27 and 37 windows of
+        them, and the training split gets 1 and 0 respectively &mdash; so the
+        model has never had an example to learn either from, and never
+        predicts them.
         Its botnets are spam and click-fraud operations that barely move
         laterally &mdash; the gap is the dataset's, not a tuning failure.</div>
     </div></div>
@@ -1321,9 +1328,10 @@ function renderForecast(d){
         inferred. The red ticks underneath are the dataset's own labels, so
         prediction and reality sit on the same axis.
         <strong>Initial Access and Lateral Movement are absent from this key on
-        purpose</strong> &mdash; CTU-13 contains only 13 and 37 windows of them
-        across all seven captures, too few for the model to learn, so it never
-        predicts either.</div>
+        purpose</strong> &mdash; across all 13 captures CTU-13 holds 27 and 37
+        windows of them, and after the split the training set gets
+        <strong>1 and 0</strong>. Lateral Movement never occurs in training at
+        all, so the model cannot emit it and never does.</div>
     </div></div>
 
     <div class="row"><div class="card">
