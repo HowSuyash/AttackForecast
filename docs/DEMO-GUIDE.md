@@ -97,7 +97,8 @@ Ye sabse important 45 second hain. Yahi tumhe baaki teams se alag karta hai.
 
 | Sawal | Jawab |
 |---|---|
-| *"100% confidence? Ye overconfident nahi hai?"* | "Ye us host pe hai jo poore capture mein malicious tha, to model ke paas bahut evidence hai. Jahan evidence kam hota hai wahan score kam aata hai — main dikha sakta hu." |
+| *"100% confidence? Ye overconfident nahi hai?"* | "Haan, aur wajah dataset hai. CTU-13 mein koi host aadha-infected hai hi nahi — 2,58,229 windows mein infected hosts ka ek bhi clean window nahi. Training data perfectly separable tha, to probabilities **calibrated nahi hain** — wo effectively binary decision hai. Decision sahi hai (F1 0.979, FPR 0.0009), par 0 aur 1 ke beech ka number information nahi rakhta. Isiliye humne binary detection ko main task nahi banaya, kill-chain progression banaya." |
+| *"Kya koi host beech wale score pe hai — 40%, 60%?"* | "Nahi, ek bhi nahi. Har host ya ~100% hai ya <5%. Ye humne check kiya hai, aur ye upar wali hi baat hai — dataset mein beech ka case maujood hi nahi." |
 | *"Time to threshold ka matlab?"* | "Kitne minute baad model ko lagta hai risk 50% cross kar jaayega. Analyst ke liye ye 'kitna time hai' wala number hai." |
 | *"Kill chain peechhe kyun jaa raha hai?"* | "Model ka apna forecast hai — wo predict kar raha hai ki agle 10 minute mein host Exfiltration se wapas Reconnaissance jaisi activity pe aa jaayega. Ye galat bhi ho sakta hai, aur isliye humne usko laal nahi, amber rakha hai — de-escalation ko escalation jaisa dikhana galat hota." |
 
