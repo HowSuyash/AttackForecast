@@ -298,6 +298,8 @@ tr.best td{color:var(--safe);font-weight:600}
 .replay button.play{background:var(--accent);color:#fff;border-color:var(--accent);
                     font-weight:600;min-width:88px}
 .replay button.play:hover{filter:brightness(1.08);color:#fff}
+.replay button#soundBtn{padding:6px 10px;font-size:14px;line-height:1}
+.replay button#soundBtn.off{opacity:.42}
 .replay .clock{font-family:var(--mono);font-size:12px;color:var(--txt-dim);
                margin-left:auto;white-space:nowrap}
 .replay input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}
@@ -1114,6 +1116,7 @@ function featureBars(items){
 /* ------------------------------------------------------------------ */
 
 let REPLAY = null, RTIMER = null, RPOS = 0, RSPEED = 400;
+let RLAST = null;      // last observed stage, for the change cue
 // False until playback actually starts, so the static view survives until then.
 let RACTIVE = false;
 
@@ -1148,6 +1151,11 @@ function replayRender(){
   // render always repaints on the first replay frame.
   const peak = Math.max(...f.forecast_stage);
   const key = f.stage + ">" + peak;
+
+  // The observed stage only, and only while playback is running: dragging
+  // the slider across the capture would otherwise fire a dozen tones.
+  if(RTIMER && RLAST != null && f.stage !== RLAST) cue(f.stage - RLAST);
+  RLAST = f.stage;
   const chain = $("#chainRow");
   if(chain && chain.dataset.key !== key){
     chain.outerHTML = killChain(f.stage, peak);
@@ -1174,6 +1182,7 @@ function replayStep(){
 
 function replayToggle(){
   if(RTIMER){ replayStop(); return; }
+  RLAST = null;
   if(REPLAY && RPOS >= REPLAY.frames.length-1) RPOS = 0;
   $("#playBtn").textContent = "❚❚  Pause";
   RTIMER = setInterval(replayStep, RSPEED);
@@ -1272,6 +1281,7 @@ function renderForecast(d){
           <option value="400" selected>Normal</option>
           <option value="150">Fast</option>
         </select>
+        <button id="soundBtn" title="Sound on stage change">&#128266;</button>
         <input type="range" id="rSlider" min="0" max="0" value="0" disabled>
         <span class="clock" id="rClock">loading replay&hellip;</span>
       </div>
@@ -1379,7 +1389,7 @@ function renderForecast(d){
   $("#playBtn").onclick = replayToggle;
   // Reset returns to the untouched static view, not to frame 0 of playback.
   $("#resetBtn").onclick = ()=>{
-    replayStop(); RPOS = 0; RACTIVE = false;
+    replayStop(); RPOS = 0; RACTIVE = false; RLAST = null;
     drawForecast($("#fcChart"), CURRENT.timeline, CURRENT.forecast,
                  CURRENT.prediction.threshold);
     drawKillStrip($("#stripChart"), CURRENT.timeline, null);
@@ -1392,6 +1402,14 @@ function renderForecast(d){
     if(RTIMER){ replayStop(); replayToggle(); }
   };
   $("#rSlider").oninput = e=>{ replayStop(); RPOS = +e.target.value; replayRender(); };
+
+  $("#soundBtn").onclick = ()=>{
+    SOUND = !SOUND;
+    try{ localStorage.setItem("af-sound", SOUND ? "1" : "0"); }catch(e){}
+    paintSound();
+    if(SOUND) cue(1);        // so the choice is audible when it is made
+  };
+  paintSound();
 
   // Prepared captures fetch their frames; an upload carries them in the
   // response it already returned.
@@ -1911,6 +1929,56 @@ window.addEventListener("resize", ()=>{
     if(sp) drawSurprise(sp, CURRENT.timeline);
   }
 });
+
+/* ------------------------------------------------------------------ */
+/* A cue on stage change. The risk line sits pinned at 100% on an infected
+   host, so the thing that actually moves during playback is the stage -
+   and in a room, the ear catches a change before the eye finds it.
+
+   Synthesised rather than loaded: an oscillator and an envelope cost no
+   files, which keeps "no CDN, nothing leaves the machine" true of the
+   audio too. Rising for an escalation, falling for a step back, so the
+   direction is audible without looking.
+
+   A projector's audio is an unknown until you are standing in front of
+   it, hence the toggle - and the choice is remembered.            */
+/* ------------------------------------------------------------------ */
+
+const SPEAKER = String.fromCodePoint(0x1F50A), MUTED = String.fromCodePoint(0x1F507);
+let ACTX = null, SOUND = true;
+try{ SOUND = localStorage.getItem("af-sound") !== "0"; }catch(e){}
+
+function cue(direction){
+  if(!SOUND) return;
+  try{
+    // Built on the first Play click: browsers refuse an AudioContext that no
+    // gesture started, and Play is the gesture.
+    ACTX = ACTX || new (window.AudioContext || window.webkitAudioContext)();
+    if(ACTX.state === "suspended") ACTX.resume();
+    const t = ACTX.currentTime;
+    const from = 660, to = direction < 0 ? 440 : 880;
+    const osc = ACTX.createOscillator();
+    const gain = ACTX.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(from, t);
+    osc.frequency.exponentialRampToValueAtTime(to, t + 0.11);
+    // Ramps, not steps: a square-edged gain change clicks.
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.07, t + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
+    osc.connect(gain).connect(ACTX.destination);
+    osc.start(t);
+    osc.stop(t + 0.28);
+  }catch(e){ SOUND = false; }          // no audio device, no problem
+}
+
+function paintSound(){
+  const b = $("#soundBtn");
+  if(!b) return;
+  b.textContent = SOUND ? SPEAKER : MUTED;
+  b.classList.toggle("off", !SOUND);
+  b.title = "Sound on stage change (" + (SOUND ? "on" : "off") + ")";
+}
 
 // Swap the placeholder diamond for a real logo the moment one exists at
 // static/logo.png, so dropping the file in is the whole install step.

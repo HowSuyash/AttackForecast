@@ -902,12 +902,12 @@ def build_references(slide) -> None:
 
     section(slide, LEFT, TOP + 3.24, WIDTH, "Team - Git with It")
     add_notes(slide, LEFT, TOP + 3.70, WIDTH, [
-        ("Suyash Shukla", "Team Leader"),
-        ("Tanmay Kumar Sinha", "Member"),
-        ("Shivam Kumar Tripathi", "Member"),
-        ("Tanay", "Member"),
-        ("Yuvan Laxmanan", "Member"),
-        ("Vaishnavi Tripathi", "Member"),
+        ("Suyash Shukla", "Team Lead · World Model"),
+        ("Tanmay Kumar Sinha", "Data Pipeline & Features"),
+        ("Shivam Kumar Tripathi", "Evaluation & Benchmarks"),
+        ("Tanay", "Dashboard & Visualisation"),
+        ("Yuvan Laxmanan", "Backend & Deployment"),
+        ("Vaishnavi Tripathi", "ATT&CK Mapping & Docs"),
     ], h=0.68)
 
     add_band(slide, LEFT, BOTTOM - 0.92, WIDTH, 0.44,
